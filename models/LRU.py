@@ -25,6 +25,13 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from models.LTI_utils import (
+    hankel_singular_values_diagonal,
+    _balanced_realization_transformation,
+    reduce_discrete_LTI,
+    LTI_to_LRU,
+    reduction_analysis
+)
 
 
 def binary_operator_diag(element_i, element_j):
@@ -98,6 +105,77 @@ class LRULayer(eqx.Module):
 
         return y
 
+    def to_lti(self):
+        """Convert LRU layer to LTI system representation."""
+        Lambdas = jnp.exp(-jnp.exp(self.nu_log) + 1j * jnp.exp(self.theta_log))
+
+        B = (self.B_re + 1j * self.B_im) * jnp.expand_dims(
+            jnp.exp(self.gamma_log), axis=-1
+        )
+        C = self.C_re + 1j * self.C_im
+        D = self.D
+
+        return Lambdas, B, C, D
+    
+    def get_dimension(self):
+        """Get the dimension of the LRU layer."""
+        return self.nu_log.shape[0]
+    
+    def get_hankel_singular_values(self):
+        """Compute Hankel singular values for this layer."""
+        Lambdas, B, C, D = self.to_lti()
+        P, Q, g = hankel_singular_values_diagonal(Lambdas, B, C)
+
+        return P, Q, g
+    
+    def get_reduction_analysis(self, g, hankel_tol=None):
+        """Get analysis of reduction potential."""
+        return reduction_analysis(g, hankel_tol)
+
+    def get_balanced_transformation(self, P, Q, method="sqrtm", eps=1e-9):
+        """Get balanced realization transformation matrix."""
+        T = _balanced_realization_transformation(P, Q, method, eps)
+        return T
+
+    def reduce_balanced_truncation(self, rank, P, Q, method="sqrtm"):
+        """Apply balanced truncation to reduce state dimension."""
+        if rank >= self.nu_log.shape[0]:
+            raise ValueError("Rank must be smaller than current state dimension.")
+
+        # Get current LTI representation
+        Lambdas, B, C, D = self.to_lti()
+
+        A_red, B_red, C_red = reduce_discrete_LTI(
+            Lambdas, B, C, P, Q, rank=rank
+        )
+
+        # Convert back to LRU parameterization
+        nu_log_new, theta_log_new, B_re_new, B_im_new, C_re_new, C_im_new, gamma_new = LTI_to_LRU(
+            A_red, B_red, C_red
+        )
+
+        # Create new reduced layer
+        return eqx.tree_at(
+        lambda x: (
+            x.nu_log,
+            x.theta_log,
+            x.B_re,
+            x.B_im,
+            x.C_re,
+            x.C_im,
+            x.gamma_log
+        ),
+        self,
+            (jnp.real(nu_log_new),
+            jnp.real(theta_log_new),
+            jnp.real(B_re_new / gamma_new[:, None]),  # Ensure proper broadcasting
+            jnp.real(B_im_new / gamma_new[:, None]),  # Ensure proper broadcasting
+            jnp.real(C_re_new),
+            jnp.real(C_im_new),
+            jnp.real(jnp.log(gamma_new))
+        )
+        )
+    
 
 class LRUBlock(eqx.Module):
 
@@ -126,6 +204,23 @@ class LRUBlock(eqx.Module):
         x = self.drop(x, key=dropkey2)
         x = skip + x
         return x, state
+    
+    def get_hankel_singular_values(self):
+        """Get Hankel singular values for the LRU layer in this block."""
+        return self.lru.get_hankel_singular_values()
+    
+    def get_dimension(self):
+        """Get the dimension of the LRU layer in this block."""
+        return self.lru.get_dimension()
+    
+    def reduce_balanced_truncation(self, rank, P, Q, method="sqrtm"):
+        """Apply balanced truncation to the LRU layer."""
+        reduced_lru = self.lru.reduce_balanced_truncation(rank, P, Q, method)
+        return eqx.tree_at(lambda block: block.lru, self, reduced_lru)
+
+    def get_reduction_analysis(self, g, hankel_tol=None):
+        """Get reduction analysis for this block."""
+        return self.lru.get_reduction_analysis(g, hankel_tol=hankel_tol)
 
 
 class LRU(eqx.Module):
@@ -178,3 +273,49 @@ class LRU(eqx.Module):
             x = x[self.output_step - 1 :: self.output_step]
             x = jax.nn.tanh(jax.vmap(self.linear_layer)(x))
         return x, state
+    
+    def get_all_hankel_singular_values(self):
+        """Get Hankel singular values (P, Q, g) for all blocks."""
+        result = {}
+        for i, block in enumerate(self.blocks):
+            P, Q, g = block.get_hankel_singular_values()
+            result[f'block_{i}'] = {
+                'P': P,
+                'Q': Q,
+                'g': g
+            }
+        return result
+    
+    # get sum of all Hankel singular values
+    def get_sum_hankel_singular_values(self):
+        """Get sum of Hankel singular values for all blocks."""
+        dico = self.get_all_hankel_singular_values()
+        total_eigs = sum(len(dico[f'block_{i}']['g']) for i in range(len(self.blocks)))
+        total_g = sum(jnp.sum(jnp.nan_to_num(dico[f'block_{i}']['g'])) for i in range(len(self.blocks))) / total_eigs
+        return total_g
+
+    def get_reduction_analysis(self, dico, hankel_tol=None):
+        """Get comprehensive reduction analysis for all blocks."""
+        analyses = {}
+        for i, block in enumerate(self.blocks):
+            analyses[f'block_{i}'] = block.get_reduction_analysis(dico[f'block_{i}']['g'], hankel_tol=hankel_tol)
+        return analyses
+    
+    def reduce_model_balanced_truncation(self, ranks, dico, method="sqrtm"):
+        """Apply balanced truncation to all blocks with specified ranks."""
+        if isinstance(ranks, int):
+            ranks = [ranks] * len(self.blocks)
+        
+        if len(ranks) != len(self.blocks):
+            raise ValueError("Number of ranks must match number of blocks.")
+        
+        new_blocks = []
+        i = 0
+        for block, rank in zip(self.blocks, ranks):
+            if rank < block.lru.nu_log.shape[0]:
+                new_blocks.append(block.reduce_balanced_truncation(rank, dico[f'block_{i}']['P'], dico[f'block_{i}']['Q'], method))
+            else:
+                new_blocks.append(block)  # No reduction needed
+            i += 1
+        
+        return eqx.tree_at(lambda model: model.blocks, self, new_blocks)

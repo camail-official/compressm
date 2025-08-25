@@ -94,3 +94,51 @@ def hankel_singular_values_diagonal(lambdas, B, C, eps=1e-9):
     PQ = P @ Q + eps * jnp.eye(P.shape[0])
     g = jnp.sqrt(jnp.maximum(jnp.linalg.eigvals(PQ).real, eps))
     return P, Q, g
+
+@eqx.filter_jit
+def _compute_reduction_analysis(g_clean, hankel_tol):
+    """Pure computation part - JIT compilable."""
+    g_sorted = jnp.sort(g_clean)[::-1]
+    total_energy = jnp.sum(g_sorted)
+    cumulative_energy = jnp.cumsum(g_sorted) / total_energy
+    
+    # Compute all thresholds
+    threshold_tol = jnp.argmax(cumulative_energy >= (1 - hankel_tol)) + 1 if hankel_tol is not None else 0
+    threshold_90 = jnp.argmax(cumulative_energy >= 0.9) + 1
+    threshold_95 = jnp.argmax(cumulative_energy >= 0.95) + 1
+    threshold_99 = jnp.argmax(cumulative_energy >= 0.99) + 1
+    threshold_999 = jnp.argmax(cumulative_energy >= 0.999) + 1
+    threshold_9999 = jnp.argmax(cumulative_energy >= 0.9999) + 1
+    
+    return g_sorted, cumulative_energy, total_energy, threshold_tol, threshold_90, threshold_95, threshold_99, threshold_999, threshold_9999
+
+def reduction_analysis(g, hankel_tol=None):
+    """Get analysis of reduction potential using JAX."""
+    # TODO: investigate when computations run into nans
+    g_clean = jnp.where(jnp.isnan(g), 0.0, g)
+    
+    # Compute thresholds
+    g_sorted, cumulative_energy, total_energy, threshold_tol, threshold_90, threshold_95, threshold_99, threshold_999, threshold_9999 = _compute_reduction_analysis(g_clean, hankel_tol)
+    
+    if hankel_tol is not None:
+        return {
+            'hankel_singular_values': g_sorted,
+            'cumulative_energy': cumulative_energy,
+            'total_energy': total_energy,
+            'recommended_ranks': {
+                'threshold': threshold_tol
+            }
+        }
+    else:
+        return {
+            'hankel_singular_values': g_sorted,
+            'cumulative_energy': cumulative_energy,
+            'total_energy': total_energy,
+            'recommended_ranks': {
+                '90%': threshold_90,
+                '95%': threshold_95,
+                '99%': threshold_99,
+                '99.9%': threshold_999,
+                '99.99%': threshold_9999,
+            }
+        }

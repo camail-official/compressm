@@ -24,15 +24,12 @@ The code for preprocessing the datasets, training LinOSS, S5, LRU, NCDE, NRDE, a
 - `pre-commit` for code formatting.
 
 ```
-conda create -n LinOSS python=3.10
-conda activate LinOSS
+conda create -n compressm python=3.10
+conda activate compressm
 conda install pre-commit=3.7.1 sktime=0.30.1 tqdm=4.66.4 matplotlib=3.8.4 -c conda-forge
 # Substitue for correct Jax pip install: https://jax.readthedocs.io/en/latest/installation.html
 pip install -U "jax[cuda12]" "jaxlib[cuda12]" equinox==0.11.4 optax==0.2.2 diffrax==0.5.1 signax==0.1.1
 ```
-
-If running `data_dir/process_uea.py` throws this error: No module named 'packaging'
-Then run: `pip install packaging`
 
 After installing the requirements, run `pre-commit install` to install the pre-commit hooks.
 

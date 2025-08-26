@@ -1,61 +1,94 @@
+# from sympy import Lambda
 import equinox as eqx
 import jax.numpy as jnp
 import jax
-import jax.scipy.linalg as jla
 
-# Some functions are Jax-adapted from https://github.com/forgi86/lru-reduction/blob/main/lru/reduction.py
+import matplotlib.pyplot as plt
+import numpy as np
 
-@eqx.filter_jit
+import scipy.linalg as la
+
+# from https://github.com/forgi86/lru-reduction/blob/main/lru/reduction.py
+def hankel_singular_values(A, B, C):
+    P = la.solve_discrete_lyapunov(A, B @ B.T.conjugate())
+    Q = la.solve_discrete_lyapunov(A.T, C.T.conjugate() @ C)
+    g = np.sqrt(np.linalg.eigvals(P @ Q))
+    return g
+
+# from https://github.com/forgi86/lru-reduction/blob/main/lru/reduction.py
+def dlyap_direct_diagonal(lambdas, Q):
+    lhs = np.kron(lambdas, np.conj(lambdas))  # Kronecker product
+    lhs = 1 - lhs
+    x = Q.flatten()/lhs
+    X = np.reshape(x, Q.shape)
+    return X
+
+# from https://github.com/forgi86/lru-reduction/blob/main/lru/reduction.py
+def hankel_singular_values_diagonal(lambdas, B, C):
+    B = np.matrix(B)
+    C = np.matrix(C)
+    P = dlyap_direct_diagonal(lambdas, B @ B.H)
+    Q = dlyap_direct_diagonal(np.conjugate(lambdas), C.H @ C)
+    PQ = P @ Q
+    g = np.sqrt(np.linalg.eigvals(PQ).real)
+    return P, Q, g
+
 def diagonalize_LTI(A, B, C):
-    """LTI system diagonalization."""
-    Lambdas, T = jnp.linalg.eig(A)
-    T_inv = jnp.linalg.inv(T)
+    Lambdas, T = la.eig(A)
+    T_inv = np.linalg.inv(T)
     Bd = T_inv @ B
     Cd = C @ T
     return Lambdas, Bd, Cd
 
-@eqx.filter_jit
+# from https://github.com/forgi86/lru-reduction/blob/main/lru/reduction.py
 def _balanced_realization_transformation(P, Q, method="sqrtm", eps=1e-9):
-    """Balanced realization transformation."""
-    def sqrtm_method():
-        P_sqrt = jla.sqrtm(P + eps * jnp.eye(P.shape[0]))
-        U, Sd, VT = jnp.linalg.svd(P_sqrt @ Q @ P_sqrt)
-        return P_sqrt @ U @ jnp.diag(1 / jnp.sqrt(jnp.sqrt(jnp.maximum(Sd, eps))))
-    
-    def chol_method():
-        Lo = jla.cholesky(Q + eps * jnp.eye(Q.shape[0]), lower=True)
-        Lc = jla.cholesky(P + eps * jnp.eye(P.shape[0]), lower=True)
-        U, S, VT = jnp.linalg.svd(Lo.T @ Lc)
-        return Lc @ VT.T @ jnp.diag(1/jnp.sqrt(jnp.maximum(S, eps)))
-    
-    # Use JAX conditional for JIT compatibility
-    return jax.lax.cond(method == "sqrtm", sqrtm_method, chol_method)
+    if method == "sqrtm":
+        P_sqrt = la.sqrtm(P + eps*np.eye(P.shape[0]))
+        [U, Sd, V] = la.svd(P_sqrt @ Q @ P_sqrt)
+        T = P_sqrt @ U @ np.diag(1 / (np.sqrt(np.sqrt(Sd))))
+    elif method == "chol":
+        Lo = la.cholesky(Q + eps*np.eye(Q.shape[0]), lower=True)
+        Lc = la.cholesky(P + eps*np.eye(P.shape[0]), lower=True)
+        U, S, VT = np.linalg.svd(Lo.T @ Lc)
+        T = Lc @ VT.T @ np.diag(1/np.sqrt(S))
+    return T
 
-@eqx.filter_jit
-def reduce_discrete_LTI(Lambdas, B, C, P, Q, rank=None, eps=1e-9):
-    """Discrete LTI system reduction with error handling."""
-    # Get transformation matrix
-    T = _balanced_realization_transformation(P, Q, method="sqrtm", eps=eps)
-    T_inv = jnp.linalg.inv(T)
+def reduce_discrete_LTI(Lambdas, B, C, P, Q, rank=None):
+    """
+    Reduce a continuous-time LTI system to a state-space representation with
+    a reduced number of states.
+    """
+
+    # check that the rank is smaller than the number of states
+    if rank is not None and rank >= Lambdas.shape[0]:
+        raise ValueError("Rank must be smaller than the number of states.")
+    # if rank is not given, return as is
+    if rank is None:
+        raise ValueError("Rank must be specified for reduction.")
     
-    # Create system matrices
-    A = jnp.diag(Lambdas)
-    
-    # Transform to balanced coordinates
+    # get the transformation matrix
+    T = _balanced_realization_transformation(P, Q)
+    T_inv = la.inv(T)
+
+    # reduce the system matrices
+    A = np.matrix(np.diag(Lambdas))
+    B = np.matrix(B)
+    C = np.matrix(C)
+
     Ab = T_inv @ A @ T
     Bb = T_inv @ B
     Cb = C @ T
-    
-    # Reduce by truncation
+
     Ared = Ab[:rank, :rank]
     Bred = Bb[:rank, :]
     Cred = Cb[:, :rank]
-    
+
     return Ared, Bred, Cred
 
-@eqx.filter_jit
 def LTI_to_LRU(A, B, C):
-    """LTI to LRU conversion."""
+    """
+    Convert an LTI system to an LRU layer.
+    """
     # Convert Lambdas to log space
     Lambdas, B, C = diagonalize_LTI(A, B, C)
 
@@ -72,28 +105,6 @@ def LTI_to_LRU(A, B, C):
     C_im = C.imag
 
     return nu_log, theta_log, B_re, B_im, C_re, C_im, gammas
-
-@eqx.filter_jit
-def dlyap_direct_diagonal(lambdas, Q):
-    """Solve discrete Lyapunov equation for diagonal system."""
-    lhs = jnp.kron(lambdas, jnp.conj(lambdas))  # Kronecker product
-    lhs = 1 - lhs
-    x = Q.flatten()/lhs
-    X = jnp.reshape(x, Q.shape)
-    return X
-
-@eqx.filter_jit
-def hankel_singular_values_diagonal(lambdas, B, C, eps=1e-9):
-    """Compute Hankel singular values for diagonal system."""
-    # TODO: justify the stabilization scheme
-    BBT = B @ B.T.conj() + eps * jnp.eye(B.shape[0])
-    CTC = C.T.conj() @ C + eps * jnp.eye(C.shape[1])
-    
-    P = dlyap_direct_diagonal(lambdas, BBT)
-    Q = dlyap_direct_diagonal(jnp.conj(lambdas), CTC)
-    PQ = P @ Q + eps * jnp.eye(P.shape[0])
-    g = jnp.sqrt(jnp.maximum(jnp.linalg.eigvals(PQ).real, eps))
-    return P, Q, g
 
 @eqx.filter_jit
 def _compute_reduction_analysis(g_clean, hankel_tol):

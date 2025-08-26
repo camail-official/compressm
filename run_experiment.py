@@ -88,10 +88,14 @@ def run_experiments(model_names, dataset_names, experiment_folder):
                 output_step = 1
 
             # Get optimizer settings (with defaults for backward compatibility)
-            weight_decay = data.get("weight_decay", 0.01)
+            weight_decay = data.get("weight_decay", 0.0)
             use_warmup_cosine = data.get("use_warmup_cosine", False)
             ssm_lr_factor = data.get("ssm_lr_factor", 1.0)
-            
+            energy_tol = data.get("energy_tol", None)
+            if energy_tol <= 0.0:
+                energy_tol = None
+            red_warmup_steps = data.get("red_warmup_steps", 0)
+
             model_args = {
                 "num_blocks": num_blocks,
                 "hidden_dim": hidden_dim,
@@ -125,9 +129,12 @@ def run_experiments(model_names, dataset_names, experiment_folder):
                 "batch_size": batch_size,
                 "output_parent_dir": output_parent_dir,
                 "id": id,
+                "data": data,
                 "weight_decay": weight_decay,
                 "use_warmup_cosine": use_warmup_cosine,
                 "ssm_lr_factor": ssm_lr_factor,
+                "energy_tol": energy_tol,
+                "red_warmup_steps": red_warmup_steps,
             }
             run_fn = create_dataset_model_and_train
 
@@ -138,7 +145,7 @@ def run_experiments(model_names, dataset_names, experiment_folder):
 
 if __name__ == "__main__":
     args = argparse.ArgumentParser()
-    args.add_argument("--dataset_name", type=str, default='EigenWorms')
+    args.add_argument("--dataset_name", type=str, default='scifar')
     args = args.parse_args()
 
     model_names = ["lru"]

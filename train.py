@@ -26,6 +26,9 @@ The function `create_dataset_model_and_train` takes the following arguments:
 - `output_parent_dir`: The parent directory where the training outputs will be saved.
 - `weight_decay`: Weight decay coefficient for AdamW optimizer (default: 0.01).
 - `use_warmup_cosine`: Whether to use warmup + cosine annealing schedule (default: False).
+- `ssm_lr_factor`: Learning rate factor for SSM parameters when using multi-transform optimizer (default: 1.0).
+- `energy_tol`: Tolerance for Hankel energy conservation (determines if we attempt to reduce and by how much)
+- `red_warmup_steps`: Number of steps to warm up before attempting reduction (default: 0, starts at first print step)
 
 The module also includes the following key functions:
 
@@ -41,6 +44,8 @@ The module also includes the following key functions:
 import os
 import shutil
 import time
+import json
+import numpy as np
 
 import equinox as eqx
 import jax
@@ -53,28 +58,44 @@ from models.generate_model import create_model
 from tqdm import tqdm
 
 
-def create_warmup_cosine_schedule(peak_lr, num_steps, warmup_ratio=0.05, final_lr=1e-7):
+def create_warmup_cosine_schedule(peak_lr, num_steps, current_step=0, warmup_ratio=0.1, final_lr=1e-7):
     """
-    Creates warmup + cosine annealing schedule as specified in the paper.
+    Creates warmup + cosine annealing schedule starting from a specific step.
     
     Args:
         peak_lr: Peak learning rate to reach after warmup
         num_steps: Total number of training steps
-        warmup_ratio: Fraction of training for warmup (default 0.1 = 10%)
+        current_step: Step to start from (default 0 for original behavior)
+        warmup_ratio: Fraction of training for warmup (default 0.05 = 5%)
         final_lr: Final learning rate after cosine decay (default 1e-7)
     
     Returns:
-        Optax schedule function
+        Optax schedule function that continues the original schedule from current_step
     """
     warmup_steps = int(num_steps * warmup_ratio)
     
-    return optax.warmup_cosine_decay_schedule(
+    # Get the original schedule function
+    original_schedule = optax.warmup_cosine_decay_schedule(
         init_value=1e-7,
         peak_value=peak_lr,
         warmup_steps=warmup_steps,
         decay_steps=num_steps - warmup_steps,
         end_value=final_lr
     )
+    
+    # Calculate remaining steps
+    remaining_steps = num_steps - current_step
+    
+    if remaining_steps <= 0:
+        # If we're at or past the end, return constant final learning rate
+        return lambda step: final_lr
+    
+    def adjusted_schedule(step):
+        # Map the new step range [0, remaining_steps] to original range [current_step, num_steps]
+        original_step = step + current_step
+        return original_schedule(original_step)
+    
+    return adjusted_schedule
 
 
 def create_ssm_label_fn(model_name):
@@ -115,27 +136,16 @@ def create_ssm_label_fn(model_name):
                 if any(ssm_param in path_str for ssm_param in ssm_params):
                     label = 'ssm'
             
-            # # Debug output to see what's being labeled
-            # print(f"Path: {path_str} -> Label: {label}")
-            
             return label
         
         labels = jax.tree_util.tree_map_with_path(get_label, params)
-        # # Quick way to see the structure
-        # print("PyTree structure:", jax.tree_util.tree_structure(labels))
-        
-        # # Count the labels
-        # flat_labels = jax.tree_util.tree_leaves(labels)
-        # ssm_count = sum(1 for label in flat_labels if label == 'ssm')
-        # main_count = sum(1 for label in flat_labels if label == 'main')
-        # print(f"Label counts: SSM={ssm_count}, Main={main_count}, Total={len(flat_labels)}")
         
         return [labels]  # Return as length-1 list
     
     return label_fn
 
 
-def create_multi_optimizer_with_equinox(model, model_name, base_lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine):
+def create_multi_optimizer_with_equinox(model_name, base_lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine, current_step=0):
     """
     Create multi-transform optimizer using Equinox-compatible approach with length-1 list wrapping.
     
@@ -153,8 +163,8 @@ def create_multi_optimizer_with_equinox(model, model_name, base_lr, ssm_lr_facto
     """
     # Create schedules and clipped optimizers
     if use_warmup_cosine:
-        main_schedule = create_warmup_cosine_schedule(base_lr, num_steps)
-        ssm_schedule = create_warmup_cosine_schedule(base_lr * ssm_lr_factor, num_steps)
+        main_schedule = create_warmup_cosine_schedule(base_lr, num_steps, current_step=current_step)
+        ssm_schedule = create_warmup_cosine_schedule(base_lr * ssm_lr_factor, num_steps, current_step=current_step)
     else:
         main_schedule = base_lr
         ssm_schedule = base_lr * ssm_lr_factor
@@ -274,10 +284,13 @@ def train_model(
     key,
     output_dir,
     id,
+    data=None,
     weight_decay=0.01,
     use_warmup_cosine=False,
     ssm_lr_factor=1.0,
-    model_name='lru'
+    model_name='lru',
+    energy_tol=None,
+    red_warmup_steps=0
 ):
 
     if metric == "accuracy":
@@ -305,28 +318,61 @@ def train_model(
         os.makedirs(output_dir)
         print(f"Directory {output_dir} has been created.")
 
+    # Save data as a json file in the output directory
+    if data is not None:
+        with open(output_dir + "/data.json", "w") as f:
+            json.dump(data, f)
+
     batchkey, key = jr.split(key, 2)
-    
-    # Create optimizer with differential learning rates for SSM parameters
-    if ssm_lr_factor != 1.0:
-        # Use multi-optimizer approach for differential learning rates
-        opt = create_multi_optimizer_with_equinox(
-            model, model_name, lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine
-        )
-        print(f"Using multi-optimizer: main_lr={lr}, ssm_lr={lr * ssm_lr_factor}, weight_decay={weight_decay}")
-        print(f"SSM parameters will use lr_factor={ssm_lr_factor} (no weight decay)")
-    else:
-        # Use single optimizer (original approach)
-        if use_warmup_cosine:
-            schedule = create_warmup_cosine_schedule(lr, num_steps)
-            print(f"Using warmup + cosine annealing schedule: peak_lr={lr}, warmup_steps={int(num_steps * 0.1)}")
-        else:
-            schedule = lr_scheduler(lr)
-            print(f"Using provided lr_scheduler with base_lr={lr}")
+
+    def create_optimizer(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine, lr_scheduler, verbose=False):
+        """
+        Create optimizer with optional differential learning rates for SSM parameters.
         
-        opt = optax.adamw(learning_rate=schedule, weight_decay=weight_decay)
-        print(f"Using single AdamW optimizer with weight_decay={weight_decay}")
-    
+        Args:
+            model_name: Name of the model architecture
+            lr: Base learning rate
+            ssm_lr_factor: Learning rate factor for SSM parameters
+            weight_decay: Weight decay coefficient
+            num_steps: Total training steps
+            use_warmup_cosine: Whether to use warmup + cosine schedule
+            lr_scheduler: Learning rate scheduler function
+            verbose: Whether to print optimizer information
+        
+        Returns:
+            Configured optimizer
+        """
+        # Create optimizer with differential learning rates for SSM parameters
+        if ssm_lr_factor != 1.0:
+            # Use multi-optimizer approach for differential learning rates
+            opt = create_multi_optimizer_with_equinox(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine
+            )
+            if verbose:
+                print(f"Using multi-optimizer: main_lr={lr}, ssm_lr={lr * ssm_lr_factor}, weight_decay={weight_decay}")
+                print(f"SSM parameters will use lr_factor={ssm_lr_factor} (no weight decay)")
+        else:
+            # Use single optimizer (original approach)
+            if use_warmup_cosine:
+                schedule = create_warmup_cosine_schedule(lr, num_steps)
+                if verbose:
+                    print(f"Using AdamW with warmup + cosine: peak_lr={lr}, warmup_steps={int(num_steps * 0.1)}")
+                    print(f"Weight_decay={weight_decay}")
+                opt = optax.adamw(learning_rate=schedule, weight_decay=weight_decay)
+            else:
+                schedule = lr_scheduler(lr)
+                if weight_decay > 0:
+                    if verbose:
+                        print(f"Using AdamW with base_lr={lr} and weight_decay={weight_decay}")
+                    opt = optax.adamw(learning_rate=schedule, weight_decay=weight_decay)
+                else:   
+                    if verbose:
+                        print(f"Using Adam and base_lr={lr}")
+                    opt = optax.adam(learning_rate=schedule)
+        
+        return opt
+
+    opt = create_optimizer(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine, lr_scheduler, verbose=True)
+
     # Initialize optimizer state with proper parameter wrapping
     model_params = eqx.filter(model, eqx.is_inexact_array)
     if ssm_lr_factor != 1.0:
@@ -354,7 +400,18 @@ def train_model(
     all_time = []
     test_metric = 0.0
     has_crashed = False
+    has_stagnated = False
     start = time.time()
+
+    # Add tracking for dimension reductions
+    reduction_history = []
+    ssm_dimensions = {}
+    hankel_singular_values = {}
+
+    for blc, block in enumerate(model.blocks):
+        if hasattr(block, 'lru'):
+            ssm_dimensions[blc] = block.get_dimension()
+
     with tqdm(total=num_steps, desc="Training", ncols=140) as pbar:
         for step, data in zip(
             range(num_steps),
@@ -368,6 +425,7 @@ def train_model(
             running_loss += value
             
             if (step + 1) % print_steps == 0:
+                # Compute training metric
                 predictions = []
                 labels = []
                 for data in dataloaders["train"].loop_epoch(batch_size):
@@ -393,6 +451,12 @@ def train_model(
                 else:
                     prediction = prediction[:, :, 0]
                     train_metric = jnp.mean(jnp.mean((prediction - y) ** 2, axis=1), axis=0)
+                # if the training metric is less than 0.15 kill training run
+                if train_metric < 0.15:
+                    has_crashed = True
+                    break
+
+                # Compute validation metric
                 predictions = []
                 labels = []
                 for data in dataloaders["val"].loop_epoch(batch_size):
@@ -421,92 +485,135 @@ def train_model(
                 end = time.time()
                 total_time = end - start
 
-                
-                start = time.time()
-                if step > 0:
-                    if operator_no_improv(val_metric, best_val(val_metric_for_best_model)):
-                        no_val_improvement += 1
-                        if no_val_improvement > 10:
-                            break
-                    else:
-                        no_val_improvement = 0
-                    if operator_improv(val_metric, best_val(val_metric_for_best_model)):
-                        val_metric_for_best_model.append(val_metric)
-                        predictions = []
-                        labels = []
-                        for data in dataloaders["test"].loop_epoch(batch_size):
-                            stepkey, key = jr.split(key, 2)
-                            inference_model = eqx.tree_inference(model, value=True)
-                            X, y = data
-                            prediction, _ = calc_output(
-                                inference_model,
-                                X,
-                                state,
-                                stepkey,
-                                model.stateful,
-                                model.nondeterministic,
-                            )
-                            predictions.append(prediction)
-                            labels.append(y)
-                        prediction = jnp.vstack(predictions)
-                        y = jnp.vstack(labels)
-                        if model.classification:
-                            test_metric = jnp.mean(
-                                jnp.argmax(prediction, axis=1) == jnp.argmax(y, axis=1)
-                            )
+
+                ### Dimensionality reduction ###
+                dico = model.get_all_hankel_singular_values()
+                hankel_singular_values[step] = dico
+
+                reduction = False
+
+                if energy_tol is not None and step > red_warmup_steps:
+                    # Get reduction analysis for all blocks
+                    reduction_analysis = model.get_reduction_analysis(dico, hankel_tol=energy_tol)
+
+                    # Extract (1-tol)% threshold ranks for each block
+                    ranks = []
+                    for i, block in enumerate(model.blocks):
+                        block_analysis = reduction_analysis[f'block_{i}']
+                        rank = block_analysis['recommended_ranks']['threshold']
+                        current_rank = block.get_dimension()
+                    
+                        # Only reduce if there's meaningful compression
+                        if rank < current_rank * 0.95:  # At least 5% reduction
+                            reduction = True
+
+                            ranks.append(rank)
+
+                            # Record the reduction
+                            reduction_info = {
+                                'step': step,
+                                'block': i,
+                                'old_dim': current_rank,
+                                'new_dim': rank,
+                                'error_bound': None,  # Add this if available from reduce_discrete_LTI
+                            }
+                            reduction_history.append(reduction_info)
+                            # Update dimensions tracker
+                            ssm_dimensions[i] = rank
+
                         else:
-                            prediction = prediction[:, :, 0]
-                            test_metric = jnp.mean(
-                                jnp.mean((prediction - y) ** 2, axis=1), axis=0
-                            )
-                        best_step = step + 1
+                            ranks.append(current_rank)  # No reduction
+                    
+                    if reduction:
+                        # Apply reduction
+                        model = model.reduce_model_balanced_truncation(ranks, dico, method="sqrtm")
+                        # Reinitialize optimizer
+                        opt = create_optimizer(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine, lr_scheduler)
+                        # Reinitialize optimizer state
+                        opt_state = opt.init(eqx.filter(model, eqx.is_inexact_array))
 
-                    # Update progress bar with metrics
-                    pbar.set_postfix({
-                        'Loss': f'{running_loss:.3f}',
-                        'Train': f'{train_metric:.3f}',
-                        'Val': f'{val_metric:.3f}',
-                        'Best test': f'{test_metric:.3f}',
-                        'Best step': f'{best_step}'
-                    })
-
-                    running_loss = 0.0
-                    all_train_metric.append(train_metric)
-                    all_val_metric.append(val_metric)
-                    all_time.append(total_time)
-                    steps = jnp.arange(0, step + 1, print_steps)
-                    all_train_metric_save = jnp.array(all_train_metric)
-                    all_val_metric_save = jnp.array(all_val_metric)
-                    all_time_save = jnp.array(all_time)
-                    test_metric_save = jnp.array(test_metric)
-                    jnp.save(output_dir + "/steps.npy", steps)
-                    jnp.save(output_dir + "/all_train_metric.npy", all_train_metric_save)
-                    jnp.save(output_dir + "/all_val_metric.npy", all_val_metric_save)
-                    jnp.save(output_dir + "/all_time.npy", all_time_save)
-                    jnp.save(output_dir + "/test_metric.npy", test_metric_save)
-
-                    # if the training metric is less than 0.15 kill training run
-                    if train_metric < 0.15:
-                        has_crashed = True
+                start = time.time()
+                if operator_no_improv(val_metric, best_val(val_metric_for_best_model)):
+                    no_val_improvement += 1
+                    if no_val_improvement > 10:
+                        has_stagnated = True
                         break
+
+                # overwrite the test metric if the validation improves or if the model has been reduced
+                # this ensures the best model is restrained to the latest reduced model size
+                if operator_improv(val_metric, best_val(val_metric_for_best_model)) or reduction:
+                    val_metric_for_best_model.append(val_metric)
+                    predictions = []
+                    labels = []
+                    for data in dataloaders["test"].loop_epoch(batch_size):
+                        stepkey, key = jr.split(key, 2)
+                        inference_model = eqx.tree_inference(model, value=True)
+                        X, y = data
+                        prediction, _ = calc_output(
+                            inference_model,
+                            X,
+                            state,
+                            stepkey,
+                            model.stateful,
+                            model.nondeterministic,
+                        )
+                        predictions.append(prediction)
+                        labels.append(y)
+                    prediction = jnp.vstack(predictions)
+                    y = jnp.vstack(labels)
+                    if model.classification:
+                        test_metric = jnp.mean(
+                            jnp.argmax(prediction, axis=1) == jnp.argmax(y, axis=1)
+                        )
+                    else:
+                        prediction = prediction[:, :, 0]
+                        test_metric = jnp.mean(
+                            jnp.mean((prediction - y) ** 2, axis=1), axis=0
+                        )
+                    best_step = step + 1
+                    # Reset no validation improvement counter either to show improvement or to give reduced model time to converge
+                    no_val_improvement = 0
+                        
+
+                # Update progress bar with metrics
+                pbar.set_postfix({
+                    'Loss': f'{running_loss:.3f}',
+                    'Train': f'{train_metric:.3f}',
+                    'Val': f'{val_metric:.3f}',
+                    'Top test': f'{test_metric:.3f} at step: {best_step}',
+                    'Avg dim': f'{int(sum(ranks)/len(ranks))}' if 'ranks' in locals() else f'{ssm_dimensions[0]}'
+                })
+
+                
+                # Performance metrics
+                all_train_metric.append(train_metric)
+                all_val_metric.append(val_metric)
+                all_time.append(total_time)
+                steps = jnp.arange(0, step + 1, print_steps)
+                all_train_metric_save = jnp.array(all_train_metric)
+                all_val_metric_save = jnp.array(all_val_metric)
+                all_time_save = jnp.array(all_time)
+                test_metric_save = jnp.array(test_metric)
+                jnp.save(output_dir + "/steps.npy", steps)
+                jnp.save(output_dir + "/all_train_metric.npy", all_train_metric_save)
+                jnp.save(output_dir + "/all_val_metric.npy", all_val_metric_save)
+                jnp.save(output_dir + "/all_time.npy", all_time_save)
+                jnp.save(output_dir + "/test_metric.npy", test_metric_save)
+
+                # Dimensionality reduction metrics
+                np.save(output_dir + "/all_hankel_singular_values.npy", hankel_singular_values)
+                np.save(output_dir + "/reduction_history.npy", np.array(reduction_history, dtype=object))
+                np.save(output_dir + "/ssm_dimensions.npy", np.array(list(ssm_dimensions.items()), dtype=object))
+                running_loss = 0.0
             
             pbar.update(1)
 
     if has_crashed:
         print(f"Unstable training has been aborted at step {step + 1}.")
+    elif has_stagnated:
+        print(f"Training has stagnated and stopped early at step {step + 1}.")
     else:
         print(f"Training completed successfully with best test metric: {test_metric:.3f} at step {best_step}.")
-
-    steps = jnp.arange(0, num_steps + 1, print_steps)
-    all_train_metric = jnp.array(all_train_metric)
-    all_val_metric = jnp.array(all_val_metric)
-    all_time = jnp.array(all_time)
-    test_metric = jnp.array(test_metric)
-    jnp.save(output_dir + "/steps.npy", steps)
-    jnp.save(output_dir + "/all_train_metric.npy", all_train_metric)
-    jnp.save(output_dir + "/all_val_metric.npy", all_val_metric)
-    jnp.save(output_dir + "/all_time.npy", all_time)
-    jnp.save(output_dir + "/test_metric.npy", test_metric)
 
     return model
 
@@ -532,9 +639,12 @@ def create_dataset_model_and_train(
     batch_size,
     output_parent_dir="",
     id=None,
+    data=None,
     weight_decay=0.01,
     use_warmup_cosine=False,
     ssm_lr_factor=1.0,
+    energy_tol=None,
+    red_warmup_steps=0
 ):
     if model_name == 'LinOSS':
         model_name_directory = model_name+'_'+linoss_discretization
@@ -555,6 +665,10 @@ def create_dataset_model_and_train(
         if name == "PIDController":
             output_dir += f"_rtol_{v.rtol}_atol_{v.atol}"
     output_dir += f"_seed_{seed}"
+    if energy_tol is not None:
+        output_dir += f"_tol_{energy_tol:.3e}"
+    if red_warmup_steps > 0:
+        output_dir += f"_warmup_{red_warmup_steps}"
 
     key = jr.PRNGKey(seed)
 
@@ -619,8 +733,11 @@ def create_dataset_model_and_train(
         trainkey,
         output_parent_dir + "/" + output_dir,
         id,
+        data=data,
         weight_decay=weight_decay,
         use_warmup_cosine=use_warmup_cosine,
         ssm_lr_factor=ssm_lr_factor,
+        energy_tol=energy_tol,
+        red_warmup_steps=red_warmup_steps,
         model_name=model_name
     )

@@ -1,0 +1,421 @@
+#!/usr/bin/env python3
+"""
+Simplified analysis script to plot test metrics by category.
+Groups runs by initial SSM dimension and tolerance (if any).
+"""
+
+import os
+import json
+import numpy as np
+import matplotlib.pyplot as plt
+from collections import defaultdict
+import re
+import argparse
+from pathlib import Path
+
+def parse_run_name(run_dir):
+    """Parse run directory name to extract key parameters."""
+    # Extract SSM dimension
+    ssm_match = re.search(r'ssm_dim_(\d+)', run_dir)
+    ssm_dim = int(ssm_match.group(1)) if ssm_match else None
+    
+    # Extract tolerance if present
+    tol_match = re.search(r'tol_([\d.e-]+)', run_dir)
+    tolerance = float(tol_match.group(1)) if tol_match else None
+    
+    # Extract seed
+    seed_match = re.search(r'seed_(\d+)', run_dir)
+    seed = int(seed_match.group(1)) if seed_match else None
+    
+    return {
+        'ssm_dim': ssm_dim,
+        'tolerance': tolerance,
+        'seed': seed,
+        'run_name': run_dir
+    }
+
+def load_test_metric(run_path):
+    """Load the test metric from a run directory."""
+    test_metric_file = os.path.join(run_path, 'test_metric.npy')
+    if os.path.exists(test_metric_file):
+        try:
+            test_metric = np.load(test_metric_file)
+            # Handle both scalar and array cases
+            if np.isscalar(test_metric):
+                return float(test_metric)
+            elif len(test_metric.shape) == 0:
+                return float(test_metric.item())
+            else:
+                return float(test_metric[0]) if len(test_metric) > 0 else None
+        except:
+            return None
+    return None
+
+def collect_results(base_path):
+    """Collect all results from the output directory."""
+    results = []
+    
+    if not os.path.exists(base_path):
+        print(f"Base path {base_path} does not exist")
+        return results
+    
+    # Check if base_path contains run directories directly (like outputs/lru/mnist/)
+    # or if it contains model/dataset subdirectories
+    base_path_items = os.listdir(base_path)
+    
+    # Check if any item in base_path looks like a run directory (contains experiment parameters)
+    has_run_dirs = any(re.search(r'ssm_dim_\d+', item) for item in base_path_items 
+                       if os.path.isdir(os.path.join(base_path, item)))
+    
+    if has_run_dirs:
+        # Base path already points to dataset level, process run directories directly
+        print(f"Processing run directories directly from: {base_path}")
+        for run_dir in base_path_items:
+            run_path = os.path.join(base_path, run_dir)
+            if not os.path.isdir(run_path):
+                continue
+            
+            # Parse run parameters
+            run_info = parse_run_name(run_dir)
+            if run_info['ssm_dim'] is None:
+                continue
+            
+            # Load test metric
+            test_metric = load_test_metric(run_path)
+            if test_metric is None:
+                continue
+            
+            # Calculate final dimension
+            final_dim = run_info['ssm_dim']  # Default to initial dimension
+            if run_info['tolerance'] is not None:  # This is a reduced run
+                reduction_history_path = os.path.join(run_path, "reduction_history.npy")
+                if os.path.exists(reduction_history_path):
+                    try:
+                        reduction_history = np.load(reduction_history_path, allow_pickle=True)
+                        if reduction_history is not None and len(reduction_history) > 0:
+                            # Calculate final dimension by summing dimensions across blocks
+                            block_dims = {}
+                            for entry in reduction_history:
+                                if 'block' in entry and 'new_dim' in entry:
+                                    block_dims[entry['block']] = entry['new_dim']
+                            
+                            if block_dims:
+                                final_dim = sum(block_dims.values())
+                    except Exception as e:
+                        print(f"Warning: Could not load reduction history for {run_path}: {e}")
+            
+            # Extract model and dataset from path
+            path_parts = base_path.rstrip('/').split('/')
+            model = path_parts[-2] if len(path_parts) >= 2 else 'unknown'
+            dataset = path_parts[-1] if len(path_parts) >= 1 else 'unknown'
+            
+            # Add to results
+            result = {
+                'model': model,
+                'dataset': dataset,
+                'ssm_dim': run_info['ssm_dim'],
+                'tolerance': run_info['tolerance'],
+                'seed': run_info['seed'],
+                'test_metric': test_metric,
+                'final_dim': final_dim,
+                'run_name': run_dir
+            }
+            results.append(result)
+    else:
+        # Original nested structure: base_path/model_dir/dataset_dir/run_dir
+        print(f"Processing nested directory structure from: {base_path}")
+        for model_dir in os.listdir(base_path):
+            model_path = os.path.join(base_path, model_dir)
+            if not os.path.isdir(model_path):
+                continue
+                
+            for dataset_dir in os.listdir(model_path):
+                dataset_path = os.path.join(model_path, dataset_dir)
+                if not os.path.isdir(dataset_path):
+                    continue
+                    
+                for run_dir in os.listdir(dataset_path):
+                    run_path = os.path.join(dataset_path, run_dir)
+                    if not os.path.isdir(run_path):
+                        continue
+                    
+                    # Parse run parameters
+                    run_info = parse_run_name(run_dir)
+                    if run_info['ssm_dim'] is None:
+                        continue
+                    
+                    # Load test metric
+                    test_metric = load_test_metric(run_path)
+                    if test_metric is None:
+                        continue
+                    
+                    # Calculate final dimension
+                    final_dim = run_info['ssm_dim']  # Default to initial dimension
+                    if run_info['tolerance'] is not None:  # This is a reduced run
+                        reduction_history_path = os.path.join(run_path, "reduction_history.npy")
+                        if os.path.exists(reduction_history_path):
+                            try:
+                                reduction_history = np.load(reduction_history_path, allow_pickle=True)
+                                if reduction_history is not None and len(reduction_history) > 0:
+                                    # Calculate final dimension by summing dimensions across blocks
+                                    block_dims = {}
+                                    for entry in reduction_history:
+                                        if 'block' in entry and 'new_dim' in entry:
+                                            block_dims[entry['block']] = entry['new_dim']
+                                    
+                                    if block_dims:
+                                        final_dim = sum(block_dims.values())
+                            except Exception as e:
+                                print(f"Warning: Could not load reduction history for {run_path}: {e}")
+                    
+                    # Add to results
+                    result = {
+                        'model': model_dir,
+                        'dataset': dataset_dir,
+                        'ssm_dim': run_info['ssm_dim'],
+                        'tolerance': run_info['tolerance'],
+                        'seed': run_info['seed'],
+                        'test_metric': test_metric,
+                        'final_dim': final_dim,
+                        'run_name': run_dir
+                    }
+                    results.append(result)
+    
+    return results
+
+def create_category_labels(results):
+    """Create category labels for grouping runs."""
+    categories = {}
+    
+    for result in results:
+        ssm_dim = result['ssm_dim']
+        tolerance = result['tolerance']
+        
+        if tolerance is None:
+            # No reduction
+            category = f"SSM-{ssm_dim} (No reduction)"
+        else:
+            # With reduction
+            if tolerance >= 1e-1:
+                tol_str = f"{tolerance:.1f}"
+            elif tolerance >= 1e-2:
+                tol_str = f"{tolerance:.2f}"
+            else:
+                tol_str = f"{tolerance:.0e}"
+            category = f"SSM-{ssm_dim} (tol={tol_str})"
+        
+        result['category'] = category
+        if category not in categories:
+            categories[category] = []
+        categories[category].append(result)
+    
+    return categories
+
+def plot_test_metrics(results, save_path=None):
+    """Create a comprehensive plot of test metrics showing min/max/mean by category."""
+    
+    if not results:
+        print("No results found to plot")
+        return
+    
+    # Get model and dataset names from results
+    model_name = results[0]['model'] if results else "Unknown"
+    dataset_name = results[0]['dataset'] if results else "Unknown"
+    
+    # Group results by initial SSM dimension and tolerance for aggregation
+    grouped_results = {}
+    
+    for result in results:
+        ssm_dim = result['ssm_dim']
+        tolerance = result['tolerance']
+        
+        # Create a key for grouping
+        if tolerance is None:
+            group_key = f"SSM-{ssm_dim}_no_reduction"
+        else:
+            group_key = f"SSM-{ssm_dim}_tol-{tolerance}"
+        
+        if group_key not in grouped_results:
+            grouped_results[group_key] = []
+        grouped_results[group_key].append(result)
+    
+    # Create figure matching the Pareto plot style
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # Process each group and calculate statistics
+    plot_data = []
+    
+    for group_key, group_results in grouped_results.items():
+        # Extract information from group key
+        if "_no_reduction" in group_key:
+            initial_ssm_dim = int(group_key.split('_')[0].replace('SSM-', ''))
+            tolerance = None
+            label = f"SSM-{initial_ssm_dim} (No reduction)"
+        else:
+            parts = group_key.split('_tol-')
+            initial_ssm_dim = int(parts[0].replace('SSM-', ''))
+            tolerance = float(parts[1])
+            label = f"SSM-{initial_ssm_dim} (tol={tolerance:.0e})"
+        
+        # Calculate test metric statistics
+        test_metrics = [r['test_metric'] for r in group_results]
+        test_min = np.min(test_metrics)
+        test_max = np.max(test_metrics) 
+        test_mean = np.mean(test_metrics)
+
+        if tolerance is None:
+            # No reduction: use initial SSM dimension as x-coordinate
+            x_coord = initial_ssm_dim
+            # For final dimensions, they're the same as initial
+            final_dims = [result['final_dim'] for result in group_results]
+        else:
+            # With reduction: extract final dimensions from results and use mean as x-coordinate
+            final_dims = [result['final_dim'] for result in group_results]
+            # Use mean final dimension as x-coordinate
+            x_coord = np.mean(final_dims)
+        
+        final_min = np.min(final_dims)
+        final_max = np.max(final_dims)
+        final_mean = np.mean(final_dims)
+        best_idx = np.argmax(test_metrics)
+        best_final_dim = group_results[best_idx]['final_dim']
+
+        plot_data.append({
+            'x_coord': x_coord,
+            'test_min': test_min,
+            'test_max': test_max,
+            'test_mean': test_mean,
+            'final_min': final_min,
+            'final_max': final_max, 
+            'final_mean': final_mean,
+            'final_best': best_final_dim,
+            'initial_ssm_dim': initial_ssm_dim,
+            'tolerance': tolerance,
+            'label': label,
+            'n_runs': len(group_results)
+        })
+    
+    # Sort plot data by initial SSM dimension, then by reduction status
+    plot_data.sort(key=lambda x: (x['initial_ssm_dim'], x['tolerance'] is not None, x['tolerance'] or 0))
+    
+    # Plot the data
+    for i, data in enumerate(plot_data):
+        x = data['x_coord']
+        
+        # Choose color based on reduction status
+        if data['tolerance'] is None:
+            color = 'black'
+            alpha = 0.6
+            marker = 'o'
+        else:
+            # Use summer colormap for reduced runs
+            color_intensity = min(0.9, 0.3 + 0.6 * (i / len(plot_data)))
+            color = plt.cm.summer(color_intensity)
+            alpha = 0.6
+            marker = 's'
+        
+        # Plot min/max as error bars
+        ax.errorbar(x, data['test_mean'], 
+                   yerr=[[data['test_mean'] - data['test_min']], 
+                         [data['test_max'] - data['test_mean']]],
+                   fmt=marker, color=color, alpha=alpha, capsize=5, capthick=2,
+                   markersize=8, label=data['label'] if i < 10 else "")  # Limit legend entries
+
+        # make x error with the min and max final dimensions
+        ax.errorbar(x, data['test_mean'], 
+                   xerr=[[x - data['final_min']], 
+                          [data['final_max'] - x]],
+                   fmt='none', color=color, alpha=alpha, capsize=5, capthick=2)
+
+        ax.scatter(data['final_best'], data['test_max'], color=color, alpha=alpha, marker="*", s=150)
+
+        # Add annotation with initial SSM dim and tolerance
+        if not data['tolerance'] is None:
+            annotation = f"Init: {data['initial_ssm_dim']}\ntol: {data['tolerance']:.0e}"
+            ax.annotate(annotation, 
+                    (x, data['test_mean']),
+                    textcoords="offset points", 
+                    xytext=(0, 15), 
+                    ha='center',
+                    fontsize=6, color='black', alpha=0.8,
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.7))
+        
+        # # Add small text showing number of runs
+        # ax.annotate(f"n={data['n_runs']}", 
+        #            (x, data['test_min'] - 0.005),
+        #            ha='center', va='top',
+        #            fontsize=5, color='gray')
+    
+    ax.set_xlabel('SSM Dimension')
+    ax.set_ylabel('Test Metric')
+    ax.set_title(f'{model_name} on {dataset_name}: Test Metrics (Min/Max/Mean) by SSM Dimension')
+    ax.grid(True, alpha=0.3)
+    ax.set_xscale('log', base=2)
+
+    # make y ticks at 0.01 intervals
+    ax.set_yticks(np.arange(0.01, 1.01, 0.01))
+    ax.set_yticklabels([f"{y:.2f}" for y in np.arange(0.01, 1.01, 0.01)])
+    
+    # set y limits to smallest min and 1
+    y_min = min(data['test_min'] for data in plot_data) if plot_data else 0
+    ax.set_ylim(y_min, 1)
+
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Plot saved to {save_path}")
+    
+    plt.show()
+    
+    return fig
+
+def print_summary_stats(results):
+    """Print summary statistics."""
+    categories = create_category_labels(results)
+    
+    print("\n" + "="*80)
+    print("SUMMARY STATISTICS")
+    print("="*80)
+    
+    for category in sorted(categories.keys()):
+        test_metrics = [r['test_metric'] for r in categories[category]]
+        print(f"\n{category}:")
+        print(f"  Count: {len(test_metrics)}")
+        print(f"  Mean:  {np.mean(test_metrics):.4f}")
+        print(f"  Std:   {np.std(test_metrics):.4f}")
+        print(f"  Min:   {np.min(test_metrics):.4f}")
+        print(f"  Max:   {np.max(test_metrics):.4f}")
+
+def main():
+    """Main analysis function."""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Analyze test metrics from experiment results')
+    parser.add_argument('base_path', help='Path to the outputs directory containing experiment results')
+    parser.add_argument('--save-plot', default='test_metrics_by_category.png', 
+                       help='Path to save the plot (default: test_metrics_by_category.png)')
+    args = parser.parse_args()
+    
+    # Configuration
+    base_path = args.base_path
+    
+    print(f"Collecting results from: {base_path}")
+    results = collect_results(base_path)
+    
+    if not results:
+        print("No results found!")
+        return
+    
+    print(f"Found {len(results)} completed runs")
+    
+    # Print summary statistics
+    print_summary_stats(results)
+    
+    # Create plots
+    print("\nCreating plots...")
+    plot_test_metrics(results, save_path=args.save_plot)
+    
+    print(f"\nAnalysis complete!")
+
+if __name__ == "__main__":
+    main()

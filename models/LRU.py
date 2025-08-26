@@ -63,7 +63,7 @@ class LRULayer(eqx.Module):
     D: jnp.ndarray
     gamma_log: jnp.ndarray
 
-    def __init__(self, N, H, r_min=0.9, r_max=0.999, max_phase=6.28, *, key):
+    def __init__(self, N, H, r_min=0.0, r_max=1.0, max_phase=6.28, *, key):
         u1_key, u2_key, B_re_key, B_im_key, C_re_key, C_im_key, D_key = jr.split(key, 7)
 
         # N: state dimension, H: model dimension
@@ -184,7 +184,7 @@ class LRUBlock(eqx.Module):
     glu: GLU
     drop: eqx.nn.Dropout
 
-    def __init__(self, N, H, r_min=0.9, r_max=0.999, max_phase=6.28, drop_rate=0.1, *, key):
+    def __init__(self, N, H, r_min=0.0, r_max=1.0, max_phase=6.28, drop_rate=0.1, *, key):
         lrukey, glukey = jr.split(key, 2)
         self.norm = eqx.nn.BatchNorm(
             input_size=H, axis_name="batch", channelwise_affine=False
@@ -242,8 +242,8 @@ class LRU(eqx.Module):
         output_dim,
         classification,
         output_step,
-        r_min=0.9,
-        r_max=0.999,
+        r_min=0.0,
+        r_max=1.0,
         max_phase=6.28,
         drop_rate=0.1,
         *,

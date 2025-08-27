@@ -12,6 +12,7 @@ from collections import defaultdict
 import re
 import argparse
 from pathlib import Path
+from matplotlib.patches import Rectangle
 
 def parse_run_name(run_dir):
     """Parse run directory name to extract key parameters."""
@@ -277,8 +278,12 @@ def plot_test_metrics(results, save_path=None):
         final_min = np.min(final_dims)
         final_max = np.max(final_dims)
         final_mean = np.mean(final_dims)
-        best_idx = np.argmax(test_metrics)
+        # Get indices of the three largest test metrics
+        top_3_indices = np.argsort(test_metrics)[-3:]
+        best_idx = top_3_indices[-1]  # Index of the best (highest) test metric
         best_final_dim = group_results[best_idx]['final_dim']
+        top_3_mean = np.mean([test_metrics[i] for i in top_3_indices])
+        top_3_final = np.mean([final_dims[i] for i in top_3_indices])
 
         plot_data.append({
             'x_coord': x_coord,
@@ -289,6 +294,8 @@ def plot_test_metrics(results, save_path=None):
             'final_max': final_max, 
             'final_mean': final_mean,
             'final_best': best_final_dim,
+            'top_3_mean': top_3_mean,
+            'top_3_final': top_3_final,
             'initial_ssm_dim': initial_ssm_dim,
             'tolerance': tolerance,
             'label': label,
@@ -308,44 +315,52 @@ def plot_test_metrics(results, save_path=None):
             alpha = 0.6
             marker = 'o'
         else:
-            # Use summer colormap for reduced runs
-            color_intensity = min(0.9, 0.3 + 0.6 * (i / len(plot_data)))
-            color = plt.cm.summer(color_intensity)
+            # Use autumn colormap for reduced runs
+            color_intensity = min(1.0, 0.3 + 0.6 * (i / len(plot_data)))
+            color = plt.cm.autumn(color_intensity)
             alpha = 0.6
             marker = 's'
         
-        # Plot min/max as error bars
-        ax.errorbar(x, data['test_mean'], 
-                   yerr=[[data['test_mean'] - data['test_min']], 
-                         [data['test_max'] - data['test_mean']]],
-                   fmt=marker, color=color, alpha=alpha, capsize=5, capthick=2,
-                   markersize=8, label=data['label'] if i < 10 else "")  # Limit legend entries
-
-        # make x error with the min and max final dimensions
-        ax.errorbar(x, data['test_mean'], 
-                   xerr=[[x - data['final_min']], 
-                          [data['final_max'] - x]],
-                   fmt='none', color=color, alpha=alpha, capsize=5, capthick=2)
-
-        ax.scatter(data['final_best'], data['test_max'], color=color, alpha=alpha, marker="*", s=150)
-
-        # Add annotation with initial SSM dim and tolerance
-        if not data['tolerance'] is None:
-            annotation = f"Init: {data['initial_ssm_dim']}\ntol: {data['tolerance']:.0e}"
-            ax.annotate(annotation, 
-                    (x, data['test_mean']),
-                    textcoords="offset points", 
-                    xytext=(0, 15), 
-                    ha='center',
-                    fontsize=6, color='black', alpha=0.8,
-                    bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.7))
+        # Plot rectangle showing min/max ranges
         
-        # # Add small text showing number of runs
-        # ax.annotate(f"n={data['n_runs']}", 
-        #            (x, data['test_min'] - 0.005),
-        #            ha='center', va='top',
-        #            fontsize=5, color='gray')
-    
+        # Calculate rectangle parameters
+        rect_width = data['final_max'] - data['final_min']
+        rect_height = data['test_max'] - data['test_min']
+        rect_x = data['final_min']
+        rect_y = data['test_min']
+        
+        # Draw rectangle with transparent background
+        if rect_width == 0:
+            rect = Rectangle((rect_x, rect_y), rect_width, rect_height,
+                    facecolor=color, alpha=0.2, edgecolor=color, 
+                    linewidth=5, linestyle='-')
+        else:
+            rect = Rectangle((rect_x, rect_y), rect_width, rect_height,
+                    facecolor=color, alpha=0.2, edgecolor=color, 
+                    linewidth=1, linestyle='-')
+        ax.add_patch(rect)
+        
+        # Plot mean point on top
+        ax.scatter(x, data['test_mean'], color=color, alpha=alpha, 
+              marker=marker, s=150, label=data['label'] if i < 10 else "",
+              edgecolors='black', linewidths=1, zorder=3)
+
+        ax.scatter(data['final_best'], data['test_max'], color=color, alpha=alpha, marker="*", s=250)
+
+        ax.scatter(data['top_3_final'], data['top_3_mean'], color=color, alpha=alpha, marker="X", s=50)
+        
+        # Add small text showing number of runs
+        if data['tolerance'] is None:
+            ax.annotate(f"N={data['n_runs']}", 
+                   (x + 0.02*x, data['test_mean']),
+                   ha='left', va='center',
+                   fontsize=8, color='gray')
+        else:
+            ax.annotate(f"N={data['n_runs']}\nInit n={data['initial_ssm_dim']}\ntol: {data['tolerance']:.0e}", 
+                       (x, data['test_mean'] - 0.003),
+                       ha='center', va='top',
+                       fontsize=8, color='gray')
+
     ax.set_xlabel('SSM Dimension')
     ax.set_ylabel('Test Metric')
     ax.set_title(f'{model_name} on {dataset_name}: Test Metrics (Min/Max/Mean) by SSM Dimension')
@@ -356,9 +371,18 @@ def plot_test_metrics(results, save_path=None):
     ax.set_yticks(np.arange(0.01, 1.01, 0.01))
     ax.set_yticklabels([f"{y:.2f}" for y in np.arange(0.01, 1.01, 0.01)])
     
-    # set y limits to smallest min and 1
-    y_min = min(data['test_min'] for data in plot_data) if plot_data else 0
-    ax.set_ylim(y_min, 1)
+    # set y limits to closest 0.02 tick below and above min and max
+    if plot_data:
+        y_min = min(data['test_min'] for data in plot_data)
+        y_max = max(data['test_max'] for data in plot_data)
+        
+        # Round to nearest 0.02 tick below and above
+        y_min_tick = np.floor(y_min / 0.02) * 0.02
+        y_max_tick = np.ceil(y_max / 0.02) * 0.02
+        
+        ax.set_ylim(y_min_tick, y_max_tick)
+    else:
+        ax.set_ylim(0.9, 1.0)
 
     plt.tight_layout()
     

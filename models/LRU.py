@@ -242,8 +242,9 @@ class LRU(eqx.Module):
         output_dim,
         classification,
         output_step,
-        r_min=0.0,
-        r_max=1.0,
+        # TODO: make the radii input parameters
+        r_min=0.9,
+        r_max=0.999,
         max_phase=6.28,
         drop_rate=0.1,
         *,

@@ -17,8 +17,7 @@ NUM_BLOCKS=(1)
 LEARNING_RATES=(0.0004)
 
 # Define the tolerance values to test with each dimension
-# TOLERANCES=(-1)
-TOLERANCES=(1e-4 5e-4 1e-3 5e-3 1e-2)
+TOLERANCES=(1e-4 5e-4 1e-3 5e-3 1e-2 5e-2 1e-1)
 
 # Define GPU assignments for each experiment (modify as needed)
 GPU_ASSIGNMENTS=(0 1)  # Use GPU 0 for first experiment, GPU 1 for second, etc.

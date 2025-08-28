@@ -27,7 +27,7 @@ The function `create_dataset_model_and_train` takes the following arguments:
 - `weight_decay`: Weight decay coefficient for AdamW optimizer (default: 0.01).
 - `use_warmup_cosine`: Whether to use warmup + cosine annealing schedule (default: False).
 - `ssm_lr_factor`: Learning rate factor for SSM parameters when using multi-transform optimizer (default: 1.0).
-- `energy_tol`: Tolerance for Hankel energy conservation (determines if we attempt to reduce and by how much)
+- `tol`: Tolerance for Hankel energy conservation (determines if we attempt to reduce and by how much)
 - `red_warmup_steps`: Number of steps to warm up before attempting reduction (default: 0, starts at first print step)
 
 The module also includes the following key functions:
@@ -77,7 +77,7 @@ def train_model(
     use_warmup_cosine=False,
     ssm_lr_factor=1.0,
     model_name='lru',
-    energy_tol=None,
+    tol=None,
     red_warmup_steps=0
 ):
 
@@ -227,9 +227,9 @@ def train_model(
 
                 reduction = False
 
-                if energy_tol is not None and step > red_warmup_steps:
+                if tol is not None and step > red_warmup_steps:
                     # Get reduction analysis for all blocks
-                    reduction_analysis = model.get_reduction_analysis(dico, hankel_tol=energy_tol)
+                    reduction_analysis = model.get_reduction_analysis(dico, hankel_tol=tol)
 
                     # Extract (1-tol)% threshold ranks for each block
                     ranks = []
@@ -380,7 +380,7 @@ def create_dataset_model_and_train(
     weight_decay=0.01,
     use_warmup_cosine=False,
     ssm_lr_factor=1.0,
-    energy_tol=None,
+    tol=None,
     red_warmup_steps=0
 ):
     if model_name == 'LinOSS':
@@ -402,8 +402,8 @@ def create_dataset_model_and_train(
         if name == "PIDController":
             output_dir += f"_rtol_{v.rtol}_atol_{v.atol}"
     output_dir += f"_seed_{seed}"
-    if energy_tol is not None:
-        output_dir += f"_tol_{energy_tol:.3e}"
+    if tol is not None:
+        output_dir += f"_tol_{tol:.3e}"
     if red_warmup_steps > 0:
         output_dir += f"_warmup_{red_warmup_steps}"
 
@@ -474,7 +474,7 @@ def create_dataset_model_and_train(
         weight_decay=weight_decay,
         use_warmup_cosine=use_warmup_cosine,
         ssm_lr_factor=ssm_lr_factor,
-        energy_tol=energy_tol,
+        tol=tol,
         red_warmup_steps=red_warmup_steps,
         model_name=model_name
     )

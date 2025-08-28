@@ -31,7 +31,7 @@ update_config() {
     local tol=$4
     
     # Use jq to update the configuration AND set single seed to prevent multiple runs
-    jq ".ssm_dim = \"$ssm_dim\" | .num_blocks = \"$num_blocks\" | .lr = \"$lr\" | .energy_tol = $tol" $CONFIG_FILE > temp.json
+    jq ".ssm_dim = \"$ssm_dim\" | .num_blocks = \"$num_blocks\" | .lr = \"$lr\" | .tol = $tol" $CONFIG_FILE > temp.json
     mv temp.json $CONFIG_FILE
     
     echo "Updated configuration with ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, tol=$tol"
@@ -61,7 +61,7 @@ run_experiment_group() {
         IFS=',' read -r ssm_dim num_blocks lr tol <<< "$exp"
         exp_count=$((exp_count + 1))
         cmd="$cmd && echo '--- Running experiment $exp_count/${#experiments[@]} in group $group_num: ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, tol=$tol ---'"
-        cmd="$cmd && jq \".ssm_dim = \\\"$ssm_dim\\\" | .num_blocks = \\\"$num_blocks\\\" | .lr = \\\"$lr\\\" | .energy_tol = $tol\" $CONFIG_FILE > temp.json && mv temp.json $CONFIG_FILE"
+        cmd="$cmd && jq \".ssm_dim = \\\"$ssm_dim\\\" | .num_blocks = \\\"$num_blocks\\\" | .lr = \\\"$lr\\\" | .tol = $tol\" $CONFIG_FILE > temp.json && mv temp.json $CONFIG_FILE"
         cmd="$cmd && CUDA_VISIBLE_DEVICES=$gpu_id python run_experiment.py --dataset_name mnist"
         cmd="$cmd && echo 'Completed experiment $exp_count/${#experiments[@]} in group $group_num: ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, tol=$tol'"
     done

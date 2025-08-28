@@ -91,9 +91,9 @@ def run_experiments(model_names, dataset_names, experiment_folder):
             weight_decay = data.get("weight_decay", 0.0)
             use_warmup_cosine = data.get("use_warmup_cosine", False)
             ssm_lr_factor = data.get("ssm_lr_factor", 1.0)
-            energy_tol = data.get("energy_tol", None)
-            if energy_tol <= 0.0:
-                energy_tol = None
+            tol = data.get("tol", None)
+            if tol <= 0.0:
+                tol = None
             red_warmup_steps = data.get("red_warmup_steps", 0)
 
             model_args = {
@@ -133,7 +133,7 @@ def run_experiments(model_names, dataset_names, experiment_folder):
                 "weight_decay": weight_decay,
                 "use_warmup_cosine": use_warmup_cosine,
                 "ssm_lr_factor": ssm_lr_factor,
-                "energy_tol": energy_tol,
+                "tol": tol,
                 "red_warmup_steps": red_warmup_steps,
             }
             run_fn = create_dataset_model_and_train

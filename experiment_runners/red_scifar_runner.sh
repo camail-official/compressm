@@ -28,13 +28,13 @@ update_config() {
     local ssm_dim=$1
     local num_blocks=$2
     local lr=$3
-    local energy_tol=$4
+    local tol=$4
     
-    # Use jq to update the configuration with energy_tol and enable reduction
-    jq ".ssm_dim = \"$ssm_dim\" | .num_blocks = \"$num_blocks\" | .lr = \"$lr\" | .energy_tol = $energy_tol | .red_warmup_steps = 0" $CONFIG_FILE > temp.json
+    # Use jq to update the configuration with tol and enable reduction
+    jq ".ssm_dim = \"$ssm_dim\" | .num_blocks = \"$num_blocks\" | .lr = \"$lr\" | .tol = $tol | .red_warmup_steps = 0" $CONFIG_FILE > temp.json
     mv temp.json $CONFIG_FILE
     
-    echo "Updated configuration with ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, energy_tol=$energy_tol (reduction enabled)"
+    echo "Updated configuration with ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, tol=$tol (reduction enabled)"
 }
 
 # Function to run a group of experiments sequentially on one GPU
@@ -58,12 +58,12 @@ run_experiment_group() {
     # Add each experiment to the command chain
     local exp_count=0
     for exp in "${experiments[@]}"; do
-        IFS=',' read -r ssm_dim num_blocks lr energy_tol <<< "$exp"
+        IFS=',' read -r ssm_dim num_blocks lr tol <<< "$exp"
         exp_count=$((exp_count + 1))
-        cmd="$cmd && echo '--- Running REDUCED SCIFAR experiment $exp_count/${#experiments[@]} in group $group_num: ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, energy_tol=$energy_tol ---'"
-        cmd="$cmd && jq \".ssm_dim = \\\"$ssm_dim\\\" | .num_blocks = \\\"$num_blocks\\\" | .lr = \\\"$lr\\\" | .energy_tol = $energy_tol | .red_warmup_steps = 0\" $CONFIG_FILE > temp.json && mv temp.json $CONFIG_FILE"
+        cmd="$cmd && echo '--- Running REDUCED SCIFAR experiment $exp_count/${#experiments[@]} in group $group_num: ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, tol=$tol ---'"
+        cmd="$cmd && jq \".ssm_dim = \\\"$ssm_dim\\\" | .num_blocks = \\\"$num_blocks\\\" | .lr = \\\"$lr\\\" | .tol = $tol | .red_warmup_steps = 0\" $CONFIG_FILE > temp.json && mv temp.json $CONFIG_FILE"
         cmd="$cmd && CUDA_VISIBLE_DEVICES=$gpu_id python run_experiment.py --dataset_name scifar"
-        cmd="$cmd && echo 'Completed REDUCED SCIFAR experiment $exp_count/${#experiments[@]} in group $group_num: ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, energy_tol=$energy_tol'"
+        cmd="$cmd && echo 'Completed REDUCED SCIFAR experiment $exp_count/${#experiments[@]} in group $group_num: ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, tol=$tol'"
     done
     
     cmd="$cmd && echo 'All REDUCED SCIFAR experiments in group $group_num completed on GPU $gpu_id' && bash"
@@ -101,8 +101,8 @@ all_experiments=()
 for ssm_dim in "${SSM_DIMS[@]}"; do
     for num_blocks in "${NUM_BLOCKS[@]}"; do
         for lr in "${LEARNING_RATES[@]}"; do
-            for energy_tol in "${TOLERANCES[@]}"; do
-                all_experiments+=("$ssm_dim,$num_blocks,$lr,$energy_tol")
+            for tol in "${TOLERANCES[@]}"; do
+                all_experiments+=("$ssm_dim,$num_blocks,$lr,$tol")
             done
         done
     done

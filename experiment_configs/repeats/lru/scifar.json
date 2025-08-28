@@ -28,6 +28,6 @@
   "weight_decay": 0.05,
   "use_warmup_cosine": true,
   "ssm_lr_factor": 0.25,
-  "energy_tol": -1,
+  "tol": -1,
   "red_warmup_steps": 0
 }

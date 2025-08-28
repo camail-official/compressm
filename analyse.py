@@ -354,7 +354,7 @@ def plot_test_metrics(results, save_path=None):
             color_intensity = min(1.0, 0.3 + 0.6 * (i / len(plot_data)))
             color = plt.cm.autumn(color_intensity)
             alpha = 0.6
-            marker = 's'
+            marker = 'o'
         
         # Plot rectangle showing min/max ranges
         

@@ -27,12 +27,17 @@ def parse_run_name(run_dir):
     # Extract seed
     seed_match = re.search(r'seed_(\d+)', run_dir)
     seed = int(seed_match.group(1)) if seed_match else None
-    
+
+    # Extract number of blocks
+    num_blocks_match = re.search(r'num_blocks_(\d+)', run_dir)
+    num_blocks = int(num_blocks_match.group(1)) if num_blocks_match else None
+
     return {
         'ssm_dim': ssm_dim,
         'tolerance': tolerance,
         'seed': seed,
-        'run_name': run_dir
+        'run_name': run_dir,
+        'num_blocks': num_blocks
     }
 
 def load_test_metric(run_path):
@@ -94,14 +99,31 @@ def collect_results(base_path):
                     try:
                         reduction_history = np.load(reduction_history_path, allow_pickle=True)
                         if reduction_history is not None and len(reduction_history) > 0:
-                            # Calculate final dimension by summing dimensions across blocks
+                            # Get the number of blocks from config or infer from reduction history
+                            config_path = os.path.join(run_path, "config.json")
+                            num_blocks = 1  # Default
+                            if os.path.exists(config_path):
+                                with open(config_path, 'r') as f:
+                                    config = json.load(f)
+                                    num_blocks = int(config.get('num_blocks', 1))
+                            
+                            # Calculate final dimension by checking each block
                             block_dims = {}
                             for entry in reduction_history:
                                 if 'block' in entry and 'new_dim' in entry:
                                     block_dims[entry['block']] = entry['new_dim']
                             
-                            if block_dims:
-                                final_dim = sum(block_dims.values())
+                            # Calculate average final dimension across all blocks
+                            total_final_dim = 0
+                            for block_id in range(num_blocks):
+                                if block_id in block_dims:
+                                    # This block was reduced
+                                    total_final_dim += block_dims[block_id]
+                                else:
+                                    # This block kept its original dimension
+                                    total_final_dim += run_info['ssm_dim']
+                            
+                            final_dim = total_final_dim / num_blocks
                     except Exception as e:
                         print(f"Warning: Could not load reduction history for {run_path}: {e}")
             
@@ -158,14 +180,27 @@ def collect_results(base_path):
                             try:
                                 reduction_history = np.load(reduction_history_path, allow_pickle=True)
                                 if reduction_history is not None and len(reduction_history) > 0:
-                                    # Calculate final dimension by summing dimensions across blocks
+                                    # Get the number of blocks from config or infer from reduction history
+                                    config_path = os.path.join(run_path, "config.json")
+                                    num_blocks = run_info['num_blocks']
+
+                                    # Calculate final dimension by checking each block
                                     block_dims = {}
                                     for entry in reduction_history:
                                         if 'block' in entry and 'new_dim' in entry:
                                             block_dims[entry['block']] = entry['new_dim']
                                     
-                                    if block_dims:
-                                        final_dim = sum(block_dims.values())
+                                    # Calculate average final dimension across all blocks
+                                    total_final_dim = 0
+                                    for block_id in range(num_blocks):
+                                        if block_id in block_dims:
+                                            # This block was reduced
+                                            total_final_dim += block_dims[block_id]
+                                        else:
+                                            # This block kept its original dimension
+                                            total_final_dim += run_info['ssm_dim']
+                                    
+                                    final_dim = total_final_dim / num_blocks
                             except Exception as e:
                                 print(f"Warning: Could not load reduction history for {run_path}: {e}")
                     

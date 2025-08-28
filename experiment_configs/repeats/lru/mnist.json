@@ -30,6 +30,6 @@
   "num_blocks": "1",
   "hidden_dim": "8",
   "ssm_dim": "256",
-  "energy_tol": 0.005,
+  "energy_tol": -1,
   "red_warmup_steps": 0
 }

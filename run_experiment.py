@@ -22,7 +22,7 @@ Usage:
 import argparse
 import json
 import diffrax
-from train import create_dataset_model_and_train
+from training.train import create_dataset_model_and_train
 
 def run_experiments(model_names, dataset_names, experiment_folder):
 

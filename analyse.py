@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Simplified analysis script to plot test metrics by category.
-Groups runs by initial SSM dimension and tolerance (if any).
+Analysis script to compare test metrics from multiple directories.
+Groups runs by initial SSM dimension and tolerance (if any) from all directories.
+Shows results from each directory with different markers for comparison.
+Supports arbitrary number of input directories.
 """
 
 import os
@@ -57,7 +59,24 @@ def load_test_metric(run_path):
             return None
     return None
 
-def collect_results(base_path):
+def load_time_metric(run_path):
+    """Load the time metric from a run directory."""
+    time_metric_file = os.path.join(run_path, 'all_time.npy')
+    if os.path.exists(time_metric_file):
+        try:
+            time_metric = np.load(time_metric_file)
+            # Handle both scalar and array cases
+            if np.isscalar(time_metric):
+                return float(time_metric)
+            elif len(time_metric.shape) == 0:
+                return float(time_metric.item())
+            else:
+                return float(sum(time_metric)) if len(time_metric) > 0 else None
+        except:
+            return None
+    return None
+
+def collect_results(base_path, directory_label=None):
     """Collect all results from the output directory."""
     results = []
     
@@ -90,7 +109,12 @@ def collect_results(base_path):
             test_metric = load_test_metric(run_path)
             if test_metric is None:
                 continue
-            
+
+            # Load time metric
+            time_metric = load_time_metric(run_path)
+            if time_metric is None:
+                continue
+
             # Calculate final dimension
             final_dim = run_info['ssm_dim']  # Default to initial dimension
             if run_info['tolerance'] is not None:  # This is a reduced run
@@ -141,7 +165,9 @@ def collect_results(base_path):
                 'seed': run_info['seed'],
                 'test_metric': test_metric,
                 'final_dim': final_dim,
-                'run_name': run_dir
+                'time_metric': time_metric,
+                'run_name': run_dir,
+                'directory_label': directory_label or base_path.split('/')[-1]
             }
             results.append(result)
     else:
@@ -170,6 +196,11 @@ def collect_results(base_path):
                     # Load test metric
                     test_metric = load_test_metric(run_path)
                     if test_metric is None:
+                        continue
+
+                    # Load time metric
+                    time_metric = load_time_metric(run_path)
+                    if time_metric is None:
                         continue
                     
                     # Calculate final dimension
@@ -212,8 +243,10 @@ def collect_results(base_path):
                         'tolerance': run_info['tolerance'],
                         'seed': run_info['seed'],
                         'test_metric': test_metric,
+                        'time_metric': time_metric,
                         'final_dim': final_dim,
-                        'run_name': run_dir
+                        'run_name': run_dir,
+                        'directory_label': directory_label or base_path.split('/')[-1]
                     }
                     results.append(result)
     
@@ -254,22 +287,34 @@ def plot_test_metrics(results, save_path=None):
         print("No results found to plot")
         return
     
-    # Get model and dataset names from results
-    model_name = results[0]['model'] if results else "Unknown"
-    dataset_name = results[0]['dataset'] if results else "Unknown"
+    # Get unique directory labels, models and datasets from results
+    directory_labels = list(set(r['directory_label'] for r in results))
+    model_names = list(set(r['model'] for r in results))
+    dataset_names = list(set(r['dataset'] for r in results))
     
-    # Group results by initial SSM dimension and tolerance for aggregation
+    # Create title based on available data
+    if len(model_names) == 1 and len(dataset_names) == 1:
+        title_suffix = f"{model_names[0]} on {dataset_names[0]}"
+    elif len(model_names) == 1:
+        title_suffix = f"{model_names[0]} on {', '.join(dataset_names)}"
+    elif len(dataset_names) == 1:
+        title_suffix = f"{', '.join(model_names)} on {dataset_names[0]}"
+    else:
+        title_suffix = f"Multiple models and datasets"
+    
+    # Group results by initial SSM dimension, tolerance, AND directory for aggregation
     grouped_results = {}
     
     for result in results:
         ssm_dim = result['ssm_dim']
         tolerance = result['tolerance']
+        directory_label = result['directory_label']
         
-        # Create a key for grouping
+        # Create a key for grouping that includes directory
         if tolerance is None:
-            group_key = f"SSM-{ssm_dim}_no_reduction"
+            group_key = f"SSM-{ssm_dim}_no_reduction_{directory_label}"
         else:
-            group_key = f"SSM-{ssm_dim}_tol-{tolerance}"
+            group_key = f"SSM-{ssm_dim}_tol-{tolerance}_{directory_label}"
         
         if group_key not in grouped_results:
             grouped_results[group_key] = []
@@ -282,22 +327,40 @@ def plot_test_metrics(results, save_path=None):
     plot_data = []
     
     for group_key, group_results in grouped_results.items():
-        # Extract information from group key
-        if "_no_reduction" in group_key:
-            initial_ssm_dim = int(group_key.split('_')[0].replace('SSM-', ''))
-            tolerance = None
-            label = f"SSM-{initial_ssm_dim} (No reduction)"
-        else:
-            parts = group_key.split('_tol-')
+        # Extract information from group key (now includes directory)
+        if "_no_reduction_" in group_key:
+            parts = group_key.split("_no_reduction_")
             initial_ssm_dim = int(parts[0].replace('SSM-', ''))
-            tolerance = float(parts[1])
-            label = f"SSM-{initial_ssm_dim} (tol={tolerance:.0e})"
+            tolerance = None
+            directory_label = parts[1]
+            label = f"SSM-{initial_ssm_dim} (No reduction) - {directory_label}"
+        else:
+            # Split by directory label (assumed to be at the end)
+            parts = group_key.rsplit('_', 1)
+            directory_label = parts[1]
+            remaining = parts[0].split('_tol-')
+            initial_ssm_dim = int(remaining[0].replace('SSM-', ''))
+            tolerance = float(remaining[1])
+            label = f"SSM-{initial_ssm_dim} (tol={tolerance:.0e}) - {directory_label}"
         
         # Calculate test metric statistics
         test_metrics = [r['test_metric'] for r in group_results]
+        # Get indices of the three largest test metrics
+        top_3_indices = np.argsort(test_metrics)[-3:]
+        best_idx = top_3_indices[-1]  # Index of the best (highest) test metric
+
         test_min = np.min(test_metrics)
         test_max = np.max(test_metrics) 
         test_mean = np.mean(test_metrics)
+        top_3_mean = np.mean([test_metrics[i] for i in top_3_indices])
+
+        # calculate the time metric statistics
+        time_metrics = [r['time_metric'] for r in group_results]
+        time_min = np.min(time_metrics)
+        time_max = np.max(time_metrics)
+        time_mean = np.mean(time_metrics)
+        top_3_time = np.mean([time_metrics[i] for i in top_3_indices])
+        best_time = time_metrics[best_idx]
 
         if tolerance is None:
             # No reduction: use initial SSM dimension as x-coordinate
@@ -309,38 +372,50 @@ def plot_test_metrics(results, save_path=None):
             final_dims = [result['final_dim'] for result in group_results]
             # Use mean final dimension as x-coordinate
             x_coord = np.mean(final_dims)
-        
+
+        # calculate final dimension statistics
         final_min = np.min(final_dims)
         final_max = np.max(final_dims)
         final_mean = np.mean(final_dims)
-        # Get indices of the three largest test metrics
-        top_3_indices = np.argsort(test_metrics)[-3:]
-        best_idx = top_3_indices[-1]  # Index of the best (highest) test metric
         best_final_dim = group_results[best_idx]['final_dim']
-        top_3_mean = np.mean([test_metrics[i] for i in top_3_indices])
         top_3_final = np.mean([final_dims[i] for i in top_3_indices])
-
-        plot_data.append({
-            'x_coord': x_coord,
-            'test_min': test_min,
-            'test_max': test_max,
-            'test_mean': test_mean,
-            'final_min': final_min,
-            'final_max': final_max, 
-            'final_mean': final_mean,
-            'final_best': best_final_dim,
-            'top_3_mean': top_3_mean,
-            'top_3_final': top_3_final,
-            'initial_ssm_dim': initial_ssm_dim,
-            'tolerance': tolerance,
-            'label': label,
-            'n_runs': len(group_results)
-        })
+        
+        if final_min >= 2**4:
+            plot_data.append({
+                'x_coord': x_coord,
+                'test_min': test_min,
+                'test_max': test_max,
+                'test_mean': test_mean,
+                'time_min': time_min,
+                'time_max': time_max,
+                'time_mean': time_mean,
+                'final_min': final_min,
+                'final_max': final_max, 
+                'final_mean': final_mean,
+                'final_best': best_final_dim,
+                'time_best': best_time,
+                'top_3_mean': top_3_mean,
+                'top_3_final': top_3_final,
+                'top_3_time': top_3_time,
+                'initial_ssm_dim': initial_ssm_dim,
+                'tolerance': tolerance,
+                'label': label,
+                'directory_label': directory_label,
+                'n_runs': len(group_results),
+                'init_dim': initial_ssm_dim
+            })
     
     # Sort plot data by initial SSM dimension, then by reduction status
     plot_data.sort(key=lambda x: (x['initial_ssm_dim'], x['tolerance'] is not None, x['tolerance'] or 0))
     
     # Plot the data
+    # Define markers and colors for different directories
+    markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h', 'H', '+', 'x']
+    dir_to_marker = {}
+    unique_dirs = list(set(data['directory_label'] for data in plot_data))
+    for i, dir_label in enumerate(unique_dirs):
+        dir_to_marker[dir_label] = markers[i % len(markers)]
+    
     for i, data in enumerate(plot_data):
         x = data['x_coord']
         
@@ -348,13 +423,14 @@ def plot_test_metrics(results, save_path=None):
         if data['tolerance'] is None:
             color = 'black'
             alpha = 0.6
-            marker = 'o'
         else:
             # Use autumn colormap for reduced runs
-            color_intensity = min(1.0, 0.3 + 0.6 * (i / len(plot_data)))
+            color_intensity = min(1.0, (i / len(plot_data))) - 0.1
             color = plt.cm.autumn(color_intensity)
             alpha = 0.6
-            marker = 'o'
+        
+        # Use different markers for different directories
+        marker = dir_to_marker[data['directory_label']]
         
         # Plot rectangle showing min/max ranges
         
@@ -373,34 +449,51 @@ def plot_test_metrics(results, save_path=None):
             rect = Rectangle((rect_x, rect_y), rect_width, rect_height,
                     facecolor=color, alpha=0.2, edgecolor=color, 
                     linewidth=1, linestyle='-')
-        ax.add_patch(rect)
+        # ax.add_patch(rect)
         
-        # Plot mean point on top
+        # # Plot mean point on top
         ax.scatter(x, data['test_mean'], color=color, alpha=alpha, 
               marker=marker, s=150, label=data['label'] if i < 10 else "",
               edgecolors='black', linewidths=1, zorder=3)
 
-        ax.scatter(data['final_best'], data['test_max'], color=color, alpha=alpha, marker="*", s=250)
+        # ax.scatter(data['final_median'], data['test_median'], color=color, alpha=alpha, marker="D", s=100)
 
-        ax.scatter(data['top_3_final'], data['top_3_mean'], color=color, alpha=alpha, marker="X", s=50)
+        ax.scatter(data['final_best'], data['test_max'], color=color, alpha=alpha, marker="*", s=250, label=data['label'])
+
+        ax.scatter(data['top_3_final'], data['top_3_mean'], color=color, alpha=alpha, marker="D", s=50)
         
-        # Add small text showing number of runs
+        # # Add small text showing number of runs under the mean point, and the average mean final dim if reduced
         if data['tolerance'] is None:
-            ax.annotate(f"N={data['n_runs']}", 
-                   (x + 0.02*x, data['test_mean']),
-                   ha='left', va='center',
+            ax.annotate(f"N={data['n_runs']}\nDim={int(x)}", 
+                   (x, data['test_mean']* 0.997),
+                   ha='center', va='top',
                    fontsize=8, color='gray')
-        else:
-            ax.annotate(f"N={data['n_runs']}\nInit n={data['initial_ssm_dim']}\ntol: {data['tolerance']:.0e}", 
-                       (x, data['test_mean'] - 0.003),
+        if data['tolerance'] is not None:
+            ax.annotate(f"N={data['n_runs']}\nDim={int(x)}\ntol: {data['tolerance']:.1e}", 
+                       (x, data['test_mean'] * 0.997),
                        ha='center', va='top',
                        fontsize=8, color='gray')
 
     ax.set_xlabel('SSM Dimension')
     ax.set_ylabel('Test Metric')
-    ax.set_title(f'{model_name} on {dataset_name}: Test Metrics (Min/Max/Mean) by SSM Dimension')
+    ax.set_title(f'{title_suffix}: Test Metrics from {len(directory_labels)} directories')
     ax.grid(True, alpha=0.3)
     ax.set_xscale('log', base=2)
+    
+    # Add legend with marker explanation
+    # legend1 = ax.legend(loc='best')
+    
+    # Add a second legend for marker meanings (dynamic based on number of directories)
+    from matplotlib.lines import Line2D
+    legend_elements = []
+    for dir_label in unique_dirs:
+        marker = dir_to_marker[dir_label]
+        legend_elements.append(
+            Line2D([0], [0], marker=marker, color='gray', linestyle='None', markersize=8, label=dir_label)
+        )
+    
+    # ax.add_artist(legend1)  # Keep the first legend
+    ax.legend(handles=legend_elements, loc='lower right', title='Directories')
 
     # make y ticks at 0.01 intervals
     ax.set_yticks(np.arange(0.01, 1.01, 0.01))
@@ -408,7 +501,7 @@ def plot_test_metrics(results, save_path=None):
     
     # set y limits to closest 0.02 tick below and above min and max
     if plot_data:
-        y_min = min(data['test_min'] for data in plot_data)
+        y_min = min(data['test_mean'] for data in plot_data)
         y_max = max(data['test_max'] for data in plot_data)
         
         # Round to nearest 0.02 tick below and above
@@ -422,19 +515,95 @@ def plot_test_metrics(results, save_path=None):
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Plot saved to {save_path}")
+        plt.savefig(save_path + 'test_metrics_by_category.png', dpi=300, bbox_inches='tight')
     
-    plt.show()
+    plt.close(fig)
+
+    # find the longest time among all runs for normalization
+    max_time = max(data['time_mean'] for data in plot_data if data['time_mean'] is not None)
+    print(f"Max time across all runs: {max_time/3600:.2f} hours")
+
+    # make the time figure
+    fig, ax = plt.subplots(figsize=(12, 8))
+    for i, data in enumerate(plot_data):
+            # Choose color based on reduction status
+            if data['tolerance'] is None:
+                color = 'black'
+                alpha = 0.6
+            else:
+                # Use autumn colormap for reduced runs
+                color_intensity = data['x_coord']/data['init_dim']  # Normalize by initial dimension
+                color = plt.cm.autumn(color_intensity)
+                alpha = 0.6
+            x = data['time_mean']/max_time
+            y = data['test_mean']
+            scatter = plt.scatter(x, y, 
+                        color=color, alpha=alpha, 
+                        marker=marker, s=data['final_mean']**2/75, label=data['label'] if i < 10 else "",
+                        edgecolors='black', linewidths=1, zorder=3, cmap='autumn')
+            
+            # # do the same with the best runs
+            # x_best = data['time_best']/max_time
+            # y_best = data['test_max']
+            # ax.scatter(x_best, y_best, color=color, alpha=alpha, marker="*", s=data['final_best']**2/50, label=data['label'])
+
+            # # Add small text showing number of runs under the mean point, and the average mean final dim if reduced
+            if data['tolerance'] is None:
+                ax.annotate(f"N={data['n_runs']}\nDim={int(data['final_mean'])}", 
+                    (x, y * 0.997),
+                    ha='center', va='top',
+                    fontsize=8, color='gray')
+            if data['tolerance'] is not None:
+                ax.annotate(f"N={data['n_runs']}\nDim={int(data['final_mean'])}\ntol: {data['tolerance']:.1e}", 
+                        (x, y * 0.997),
+                        ha='center', va='top',
+                        fontsize=8, color='gray')
+                
+    plt.xlabel('Training Time (normalized vs longest run)')
+    plt.ylabel('Test Metric')
+    plt.title(f'{title_suffix}: Test Metric vs Training Time')
+    plt.grid(True, alpha=0.3)
     
-    return fig
+    # Add colorbar
+    # cbar = plt.colorbar(scatter)
+    # cbar.set_label('Reduction Percentage (%)')
+    
+    plt.savefig(os.path.join(save_path, 'test_metric_vs_time.png'), dpi=300, bbox_inches='tight')
+    print(f"Plot saved in {save_path}")
+    plt.close()
+    
+    return
 
 def print_summary_stats(results):
     """Print summary statistics."""
     categories = create_category_labels(results)
     
+    # Group by directory for summary
+    directory_stats = defaultdict(list)
+    for result in results:
+        directory_stats[result['directory_label']].append(result)
+    
     print("\n" + "="*80)
-    print("SUMMARY STATISTICS")
+    print("SUMMARY STATISTICS BY DIRECTORY")
+    print("="*80)
+    
+    for directory_label, dir_results in directory_stats.items():
+        print(f"\n{directory_label}: {len(dir_results)} runs")
+        print("-" * 40)
+        
+        # Group by category within this directory
+        dir_categories = create_category_labels(dir_results)
+        for category in sorted(dir_categories.keys()):
+            test_metrics = [r['test_metric'] for r in dir_categories[category]]
+            print(f"  {category}:")
+            print(f"    Count: {len(test_metrics)}")
+            print(f"    Mean:  {np.mean(test_metrics):.4f}")
+            print(f"    Std:   {np.std(test_metrics):.4f}")
+            print(f"    Min:   {np.min(test_metrics):.4f}")
+            print(f"    Max:   {np.max(test_metrics):.4f}")
+    
+    print("\n" + "="*80)
+    print("OVERALL SUMMARY STATISTICS")
     print("="*80)
     
     for category in sorted(categories.keys()):
@@ -442,36 +611,55 @@ def print_summary_stats(results):
         print(f"\n{category}:")
         print(f"  Count: {len(test_metrics)}")
         print(f"  Mean:  {np.mean(test_metrics):.4f}")
-        print(f"  Std:   {np.std(test_metrics):.4f}")
-        print(f"  Min:   {np.min(test_metrics):.4f}")
-        print(f"  Max:   {np.max(test_metrics):.4f}")
+        # print the average final dimension as well
+        final_dims = [r['final_dim'] for r in dir_categories[category]]
+        print(f"    Avg Final Dim: {np.mean(final_dims):.1f}")
 
 def main():
     """Main analysis function."""
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Analyze test metrics from experiment results')
-    parser.add_argument('base_path', help='Path to the outputs directory containing experiment results')
-    parser.add_argument('--save-plot', default='test_metrics_by_category.png', 
-                       help='Path to save the plot (default: test_metrics_by_category.png)')
+    parser.add_argument('directories', nargs='+', help='One or more paths to directories containing experiment results')
+    parser.add_argument('--save-plot', default='analysis/', 
+                       help='Path to save the plot (default: analysis/)')
+    parser.add_argument('--labels', nargs='*', help='Optional custom labels for each directory (must match number of directories)')
     args = parser.parse_args()
     
     # Configuration
-    base_path = args.base_path
+    directories = args.directories
+    custom_labels = args.labels
     
-    print(f"Collecting results from: {base_path}")
-    results = collect_results(base_path)
+    # Generate directory labels
+    if custom_labels and len(custom_labels) == len(directories):
+        directory_labels = custom_labels
+    else:
+        if custom_labels:
+            print(f"Warning: Number of labels ({len(custom_labels)}) doesn't match number of directories ({len(directories)}). Using default labels.")
+        directory_labels = [Path(directory).name for directory in directories]
+    
+    # Collect results from all directories
+    all_results = []
+    for i, directory in enumerate(directories):
+        print(f"Collecting results from: {directory}")
+        dir_results = collect_results(directory, directory_label=directory_labels[i])
+        print(f"Found {len(dir_results)} runs from {directory_labels[i]}")
+        all_results.extend(dir_results)
+    
+    # Combine all results
+    results = all_results
     
     if not results:
-        print("No results found!")
+        print("No results found from any directory!")
         return
     
-    print(f"Found {len(results)} completed runs")
+    print(f"Total: {len(results)} completed runs from {len(directories)} directories combined")
     
-    # Print summary statistics
-    print_summary_stats(results)
+    # # Print summary statistics
+    # print_summary_stats(results)
     
     # Create plots
     print("\nCreating plots...")
+    os.makedirs(args.save_plot, exist_ok=True)
     plot_test_metrics(results, save_path=args.save_plot)
     
     print(f"\nAnalysis complete!")

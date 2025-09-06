@@ -31,5 +31,5 @@
   "hidden_dim": "8",
   "ssm_dim": "256",
   "tol": -1,
-  "red_warmup_steps": 0
+  "red_steps": 2000000
 }

@@ -28,7 +28,7 @@ The function `create_dataset_model_and_train` takes the following arguments:
 - `use_warmup_cosine`: Whether to use warmup + cosine annealing schedule (default: False).
 - `ssm_lr_factor`: Learning rate factor for SSM parameters when using multi-transform optimizer (default: 1.0).
 - `tol`: Tolerance for Hankel energy conservation (determines if we attempt to reduce and by how much)
-- `red_warmup_steps`: Number of steps to warm up before attempting reduction (default: 0, starts at first print step)
+- `red_steps`: Number of initial steps to do reduction before just training (default: 1e10, i.e. reduce during all training)
 
 The module also includes the following key functions:
 
@@ -78,7 +78,7 @@ def train_model(
     ssm_lr_factor=1.0,
     model_name='lru',
     tol=None,
-    red_warmup_steps=0
+    red_steps=1e10,
 ):
 
     if metric == "accuracy":
@@ -227,7 +227,7 @@ def train_model(
 
                 reduction = False
 
-                if tol is not None and step < red_warmup_steps + 1:
+                if tol is not None and step < red_steps + 1:
                     # Get reduction analysis for all blocks
                     reduction_analysis = model.get_reduction_analysis(dico, hankel_tol=tol)
 
@@ -381,7 +381,7 @@ def create_dataset_model_and_train(
     use_warmup_cosine=False,
     ssm_lr_factor=1.0,
     tol=None,
-    red_warmup_steps=0
+    red_steps=0
 ):
     if model_name == 'LinOSS':
         model_name_directory = model_name+'_'+linoss_discretization
@@ -404,8 +404,8 @@ def create_dataset_model_and_train(
     output_dir += f"_seed_{seed}"
     if tol is not None:
         output_dir += f"_tol_{tol:.3e}"
-    if red_warmup_steps > 0:
-        output_dir += f"_warmup_{red_warmup_steps}"
+    if red_steps > 0:
+        output_dir += f"_warmup_{red_steps}"
 
     key = jr.PRNGKey(seed)
 
@@ -475,6 +475,6 @@ def create_dataset_model_and_train(
         use_warmup_cosine=use_warmup_cosine,
         ssm_lr_factor=ssm_lr_factor,
         tol=tol,
-        red_warmup_steps=red_warmup_steps,
+        red_steps=red_steps,
         model_name=model_name
     )

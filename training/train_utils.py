@@ -5,27 +5,39 @@ import optax
 
 def create_warmup_cosine_schedule(peak_lr, num_steps, warmup_ratio=0.1, final_lr=1e-7):
     """
-    Creates warmup + cosine annealing schedule starting from a specific step.
+    Creates warmup + cosine annealing schedule.
     
     Args:
         peak_lr: Peak learning rate to reach after warmup
         num_steps: Total number of training steps
-        warmup_ratio: Fraction of training for warmup (default 0.05 = 5%)
+        warmup_ratio: Fraction of training for warmup (default 0.1 = 10%)
         final_lr: Final learning rate after cosine decay (default 1e-7)
-    
     Returns:
         Optax schedule function
     """
     warmup_steps = int(num_steps * warmup_ratio)
+    cosine_steps = num_steps - warmup_steps
     
-    # Return the schedule function
-    return optax.warmup_cosine_decay_schedule(
+    # Create individual schedules
+    warmup_schedule = optax.linear_schedule(
         init_value=1e-7,
-        peak_value=peak_lr,
-        warmup_steps=warmup_steps,
-        decay_steps=num_steps - warmup_steps,
-        end_value=final_lr
+        end_value=peak_lr,
+        transition_steps=warmup_steps
     )
+        
+    cosine_schedule = optax.cosine_decay_schedule(
+        init_value=peak_lr,
+        decay_steps=cosine_steps,
+        alpha=final_lr / peak_lr
+    )
+    
+    # Join the schedules
+    schedule = optax.join_schedules(
+        schedules=[warmup_schedule, cosine_schedule],
+        boundaries=[warmup_steps]
+    )
+    
+    return schedule
     
 
 def create_ssm_label_fn(model_name):
@@ -90,7 +102,7 @@ def create_multi_optimizer_with_equinox(model_name, base_lr, ssm_lr_factor, weig
         weight_decay: Weight decay for main parameters
         num_steps: Total training steps
         use_warmup_cosine: Whether to use warmup + cosine schedule
-    
+
     Returns:
         Configured optax multi-transform optimizer
     """

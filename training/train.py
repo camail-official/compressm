@@ -227,7 +227,7 @@ def train_model(
 
                 reduction = False
 
-                if tol is not None and step > red_warmup_steps:
+                if tol is not None and step < red_warmup_steps + 1:
                     # Get reduction analysis for all blocks
                     reduction_analysis = model.get_reduction_analysis(dico, hankel_tol=tol)
 

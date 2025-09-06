@@ -353,6 +353,7 @@ def plot_test_metrics(results, save_path=None):
         test_max = np.max(test_metrics) 
         test_mean = np.mean(test_metrics)
         top_3_mean = np.mean([test_metrics[i] for i in top_3_indices])
+        test_std = np.std(test_metrics)
 
         # calculate the time metric statistics
         time_metrics = [r['time_metric'] for r in group_results]
@@ -361,6 +362,7 @@ def plot_test_metrics(results, save_path=None):
         time_mean = np.mean(time_metrics)
         top_3_time = np.mean([time_metrics[i] for i in top_3_indices])
         best_time = time_metrics[best_idx]
+        time_std = np.std(time_metrics)
 
         if tolerance is None:
             # No reduction: use initial SSM dimension as x-coordinate
@@ -379,31 +381,34 @@ def plot_test_metrics(results, save_path=None):
         final_mean = np.mean(final_dims)
         best_final_dim = group_results[best_idx]['final_dim']
         top_3_final = np.mean([final_dims[i] for i in top_3_indices])
-        
-        if final_min >= 2**4:
-            plot_data.append({
-                'x_coord': x_coord,
-                'test_min': test_min,
-                'test_max': test_max,
-                'test_mean': test_mean,
-                'time_min': time_min,
-                'time_max': time_max,
-                'time_mean': time_mean,
-                'final_min': final_min,
-                'final_max': final_max, 
-                'final_mean': final_mean,
-                'final_best': best_final_dim,
-                'time_best': best_time,
-                'top_3_mean': top_3_mean,
-                'top_3_final': top_3_final,
-                'top_3_time': top_3_time,
-                'initial_ssm_dim': initial_ssm_dim,
-                'tolerance': tolerance,
-                'label': label,
-                'directory_label': directory_label,
-                'n_runs': len(group_results),
-                'init_dim': initial_ssm_dim
-            })
+        final_std = np.std(final_dims)
+
+        plot_data.append({
+            'x_coord': x_coord,
+            'test_min': test_min,
+            'test_max': test_max,
+            'test_mean': test_mean,
+            'test_std': test_std,
+            'time_min': time_min,
+            'time_max': time_max,
+            'time_mean': time_mean,
+            'time_std': time_std,
+            'final_min': final_min,
+            'final_max': final_max, 
+            'final_mean': final_mean,
+            'final_std': final_std,
+            'final_best': best_final_dim,
+            'time_best': best_time,
+            'top_3_mean': top_3_mean,
+            'top_3_final': top_3_final,
+            'top_3_time': top_3_time,
+            'initial_ssm_dim': initial_ssm_dim,
+            'tolerance': tolerance,
+            'label': label,
+            'directory_label': directory_label,
+            'n_runs': len(group_results),
+            'init_dim': initial_ssm_dim
+        })
     
     # Sort plot data by initial SSM dimension, then by reduction status
     plot_data.sort(key=lambda x: (x['initial_ssm_dim'], x['tolerance'] is not None, x['tolerance'] or 0))
@@ -432,31 +437,18 @@ def plot_test_metrics(results, save_path=None):
         # Use different markers for different directories
         marker = dir_to_marker[data['directory_label']]
         
-        # Plot rectangle showing min/max ranges
-        
-        # Calculate rectangle parameters
-        rect_width = data['final_max'] - data['final_min']
-        rect_height = data['test_max'] - data['test_min']
-        rect_x = data['final_min']
-        rect_y = data['test_min']
-        
-        # Draw rectangle with transparent background
-        if rect_width == 0:
-            rect = Rectangle((rect_x, rect_y), rect_width, rect_height,
-                    facecolor=color, alpha=0.2, edgecolor=color, 
-                    linewidth=5, linestyle='-')
-        else:
-            rect = Rectangle((rect_x, rect_y), rect_width, rect_height,
-                    facecolor=color, alpha=0.2, edgecolor=color, 
-                    linewidth=1, linestyle='-')
-        # ax.add_patch(rect)
-        
         # # Plot mean point on top
         ax.scatter(x, data['test_mean'], color=color, alpha=alpha, 
               marker=marker, s=150, label=data['label'] if i < 10 else "",
               edgecolors='black', linewidths=1, zorder=3)
-
-        # ax.scatter(data['final_median'], data['test_median'], color=color, alpha=alpha, marker="D", s=100)
+        
+        if data['test_std'] > 0:
+            ax.errorbar(x, data['test_mean'], yerr=data['test_std'], 
+                        fmt='none', ecolor=color, alpha=0.5, capsize=5, zorder=2)
+            
+        if data['final_std'] > 0:   
+            ax.errorbar(x, data['test_mean'], xerr=data['final_std'], 
+                        fmt='none', ecolor=color, alpha=0.5, capsize=5, zorder=2)
 
         ax.scatter(data['final_best'], data['test_max'], color=color, alpha=alpha, marker="*", s=250, label=data['label'])
 
@@ -479,9 +471,6 @@ def plot_test_metrics(results, save_path=None):
     ax.set_title(f'{title_suffix}: Test Metrics from {len(directory_labels)} directories')
     ax.grid(True, alpha=0.3)
     ax.set_xscale('log', base=2)
-    
-    # Add legend with marker explanation
-    # legend1 = ax.legend(loc='best')
     
     # Add a second legend for marker meanings (dynamic based on number of directories)
     from matplotlib.lines import Line2D
@@ -541,11 +530,13 @@ def plot_test_metrics(results, save_path=None):
                         color=color, alpha=alpha, 
                         marker=marker, s=data['final_mean']**2/75, label=data['label'] if i < 10 else "",
                         edgecolors='black', linewidths=1, zorder=3, cmap='autumn')
-            
-            # # do the same with the best runs
-            # x_best = data['time_best']/max_time
-            # y_best = data['test_max']
-            # ax.scatter(x_best, y_best, color=color, alpha=alpha, marker="*", s=data['final_best']**2/50, label=data['label'])
+            # Plot error bars
+            if data['test_std'] > 0:
+                ax.errorbar(x, y, yerr=data['test_std'], 
+                            fmt='none', ecolor=color, alpha=0.5, capsize=5, zorder=2)
+            if data['time_std'] > 0:
+                ax.errorbar(x, y, xerr=data['time_std']/max_time, 
+                            fmt='none', ecolor=color, alpha=0.5, capsize=5, zorder=2)
 
             # # Add small text showing number of runs under the mean point, and the average mean final dim if reduced
             if data['tolerance'] is None:

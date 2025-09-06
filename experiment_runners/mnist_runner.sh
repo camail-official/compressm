@@ -20,7 +20,7 @@ LEARNING_RATES=(0.0004)
 TOLERANCES=(-1)
 
 # Define GPU assignments for each experiment (modify as needed)
-GPU_ASSIGNMENTS=(2 3)  # Use GPU 0 for first experiment, GPU 1 for second, etc.
+GPU_ASSIGNMENTS=(0 1 2 3)  # Use GPU 0 for first experiment, GPU 1 for second, etc.
 # If you have fewer GPUs than experiments, they will cycle through the available GPUs
 
 # Function to update the JSON configuration file

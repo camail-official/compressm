@@ -5,7 +5,7 @@
 CONFIG_FILE="experiment_configs/repeats/lru/scifar.json"
 
 # Define the different ssm_dim values to test
-SSM_DIMS=(16 32 64 128 256 384)
+SSM_DIMS=(64 128 256 384)
 
 # shuffle the ssmdims
 SSM_DIMS=($(shuf -e "${SSM_DIMS[@]}"))
@@ -14,13 +14,13 @@ SSM_DIMS=($(shuf -e "${SSM_DIMS[@]}"))
 NUM_BLOCKS=(6)
 
 # Define the different learning rates to test
-LEARNING_RATES=(0.002)
+LEARNING_RATES=(0.001)
 
 # Define the tolerance values to test with each dimension
 TOLERANCES=(-1)
 
 # Define GPU assignments for each experiment (modify as needed)
-GPU_ASSIGNMENTS=(0 1)  # Use GPU 0 for first experiment, GPU 1 for second, etc.
+GPU_ASSIGNMENTS=(0 1 2 3)  # Use GPU 0 for first experiment, GPU 1 for second, etc.
 # If you have fewer GPUs than experiments, they will cycle through the available GPUs
 
 # Function to update the JSON configuration file

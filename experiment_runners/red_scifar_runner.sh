@@ -14,13 +14,13 @@ SSM_DIMS=($(shuf -e "${SSM_DIMS[@]}"))
 NUM_BLOCKS=(6)
 
 # Define the different learning rates to test
-LEARNING_RATES=(0.002)
+LEARNING_RATES=(0.001)
 
 # Define the tolerance values for dimensionality reduction
-TOLERANCES=(1e-3 2e-3 5e-3 1e-2 2e-2 5e-2)
+TOLERANCES=(2e-2 3e-2 5e-2 7e-2 1e-1 1.5e-1)
 
 # Define GPU assignments for each experiment (modify as needed)
-GPU_ASSIGNMENTS=(2 3)  # Use GPU 0 for first experiment, GPU 1 for second, etc.
+GPU_ASSIGNMENTS=(0 1 2 3)  # Use GPU 0 for first experiment, GPU 1 for second, etc.
 # If you have fewer GPUs than experiments, they will cycle through the available GPUs
 
 # Function to update the JSON configuration file
@@ -31,7 +31,7 @@ update_config() {
     local tol=$4
     
     # Use jq to update the configuration with tol and enable reduction
-    jq ".ssm_dim = \"$ssm_dim\" | .num_blocks = \"$num_blocks\" | .lr = \"$lr\" | .tol = $tol | .red_warmup_steps = 0" $CONFIG_FILE > temp.json
+    jq ".ssm_dim = \"$ssm_dim\" | .num_blocks = \"$num_blocks\" | .lr = \"$lr\" | .tol = $tol" $CONFIG_FILE > temp.json
     mv temp.json $CONFIG_FILE
     
     echo "Updated configuration with ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, tol=$tol (reduction enabled)"
@@ -61,7 +61,7 @@ run_experiment_group() {
         IFS=',' read -r ssm_dim num_blocks lr tol <<< "$exp"
         exp_count=$((exp_count + 1))
         cmd="$cmd && echo '--- Running REDUCED SCIFAR experiment $exp_count/${#experiments[@]} in group $group_num: ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, tol=$tol ---'"
-        cmd="$cmd && jq \".ssm_dim = \\\"$ssm_dim\\\" | .num_blocks = \\\"$num_blocks\\\" | .lr = \\\"$lr\\\" | .tol = $tol | .red_warmup_steps = 0\" $CONFIG_FILE > temp.json && mv temp.json $CONFIG_FILE"
+        cmd="$cmd && jq \".ssm_dim = \\\"$ssm_dim\\\" | .num_blocks = \\\"$num_blocks\\\" | .lr = \\\"$lr\\\" | .tol = $tol\" $CONFIG_FILE > temp.json && mv temp.json $CONFIG_FILE"
         cmd="$cmd && CUDA_VISIBLE_DEVICES=$gpu_id python run_experiment.py --dataset_name scifar"
         cmd="$cmd && echo 'Completed REDUCED SCIFAR experiment $exp_count/${#experiments[@]} in group $group_num: ssm_dim=$ssm_dim, num_blocks=$num_blocks, lr=$lr, tol=$tol'"
     done

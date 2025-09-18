@@ -53,7 +53,7 @@ def _balanced_realization_transformation(P, Q, method="sqrtm", eps=1e-9):
         T = Lc @ VT.T @ np.diag(1/np.sqrt(S))
     return T
 
-def reduce_discrete_LTI(Lambdas, B, C, P, Q, rank=None):
+def reduce_discrete_LTI(Lambdas, B, C, P, Q, rank=None, method="sqrtm", randomize=False):
     """
     Reduce a continuous-time LTI system to a state-space representation with
     a reduced number of states.
@@ -66,22 +66,34 @@ def reduce_discrete_LTI(Lambdas, B, C, P, Q, rank=None):
     if rank is None:
         raise ValueError("Rank must be specified for reduction.")
     
-    # get the transformation matrix
-    T = _balanced_realization_transformation(P, Q)
-    T_inv = la.inv(T)
+    if randomize:
+        permuted_indices = np.random.permutation(Lambdas.shape[0])
+        selected_indices = np.sort(permuted_indices[:rank])
+        Lambdas = Lambdas[selected_indices]
+        B = B[selected_indices, :]
+        C = C[:, selected_indices]
 
-    # reduce the system matrices
-    A = np.matrix(np.diag(Lambdas))
-    B = np.matrix(B)
-    C = np.matrix(C)
+        Ared = np.matrix(np.diag(Lambdas))
+        Bred = np.matrix(B)
+        Cred = np.matrix(C)
 
-    Ab = T_inv @ A @ T
-    Bb = T_inv @ B
-    Cb = C @ T
+    else:
+        # get the transformation matrix
+        T = _balanced_realization_transformation(P, Q, method=method)
+        T_inv = la.inv(T)
 
-    Ared = Ab[:rank, :rank]
-    Bred = Bb[:rank, :]
-    Cred = Cb[:, :rank]
+        # reduce the system matrices
+        A = np.matrix(np.diag(Lambdas))
+        B = np.matrix(B)
+        C = np.matrix(C)
+
+        Ab = T_inv @ A @ T
+        Bb = T_inv @ B
+        Cb = C @ T
+
+        Ared = Ab[:rank, :rank]
+        Bred = Bb[:rank, :]
+        Cred = Cb[:, :rank]
 
     return Ared, Bred, Cred
 

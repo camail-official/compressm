@@ -24,7 +24,7 @@
   "lr": "0.001",
   "num_blocks": "6",
   "hidden_dim": "512",
-  "ssm_dim": "384",
+  "ssm_dim": "64",
   "weight_decay": 0.05,
   "use_warmup_cosine": true,
   "ssm_lr_factor": 0.25,

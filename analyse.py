@@ -383,32 +383,33 @@ def plot_test_metrics(results, save_path=None):
         top_3_final = np.mean([final_dims[i] for i in top_3_indices])
         final_std = np.std(final_dims)
 
-        plot_data.append({
-            'x_coord': x_coord,
-            'test_min': test_min,
-            'test_max': test_max,
-            'test_mean': test_mean,
-            'test_std': test_std,
-            'time_min': time_min,
-            'time_max': time_max,
-            'time_mean': time_mean,
-            'time_std': time_std,
-            'final_min': final_min,
-            'final_max': final_max, 
-            'final_mean': final_mean,
-            'final_std': final_std,
-            'final_best': best_final_dim,
-            'time_best': best_time,
-            'top_3_mean': top_3_mean,
-            'top_3_final': top_3_final,
-            'top_3_time': top_3_time,
-            'initial_ssm_dim': initial_ssm_dim,
-            'tolerance': tolerance,
-            'label': label,
-            'directory_label': directory_label,
-            'n_runs': len(group_results),
-            'init_dim': initial_ssm_dim
-        })
+        if final_mean > 16:  # Skip plotting if mean final dimension is 16 or more:
+            plot_data.append({
+                'x_coord': x_coord,
+                'test_min': test_min,
+                'test_max': test_max,
+                'test_mean': test_mean,
+                'test_std': test_std,
+                'time_min': time_min,
+                'time_max': time_max,
+                'time_mean': time_mean,
+                'time_std': time_std,
+                'final_min': final_min,
+                'final_max': final_max, 
+                'final_mean': final_mean,
+                'final_std': final_std,
+                'final_best': best_final_dim,
+                'time_best': best_time,
+                'top_3_mean': top_3_mean,
+                'top_3_final': top_3_final,
+                'top_3_time': top_3_time,
+                'initial_ssm_dim': initial_ssm_dim,
+                'tolerance': tolerance,
+                'label': label,
+                'directory_label': directory_label,
+                'n_runs': len(group_results),
+                'init_dim': initial_ssm_dim
+            })
     
     # Sort plot data by initial SSM dimension, then by reduction status
     plot_data.sort(key=lambda x: (x['initial_ssm_dim'], x['tolerance'] is not None, x['tolerance'] or 0))
@@ -450,9 +451,9 @@ def plot_test_metrics(results, save_path=None):
             ax.errorbar(x, data['test_mean'], xerr=data['final_std'], 
                         fmt='none', ecolor=color, alpha=0.5, capsize=5, zorder=2)
 
-        ax.scatter(data['final_best'], data['test_max'], color=color, alpha=alpha, marker="*", s=250, label=data['label'])
+        # ax.scatter(data['final_best'], data['test_max'], color=color, alpha=alpha, marker="*", s=250, label=data['label'])
 
-        ax.scatter(data['top_3_final'], data['top_3_mean'], color=color, alpha=alpha, marker="D", s=50)
+        # ax.scatter(data['top_3_final'], data['top_3_mean'], color=color, alpha=alpha, marker="D", s=50)
         
         # # Add small text showing number of runs under the mean point, and the average mean final dim if reduced
         if data['tolerance'] is None:
@@ -529,7 +530,7 @@ def plot_test_metrics(results, save_path=None):
             scatter = plt.scatter(x, y, 
                         color=color, alpha=alpha, 
                         marker=marker, s=data['final_mean']**2/75, label=data['label'] if i < 10 else "",
-                        edgecolors='black', linewidths=1, zorder=3, cmap='autumn')
+                        edgecolors='black', linewidths=1, zorder=3)
             # Plot error bars
             if data['test_std'] > 0:
                 ax.errorbar(x, y, yerr=data['test_std'], 

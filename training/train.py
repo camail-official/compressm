@@ -261,7 +261,7 @@ def train_model(
                     
                     if reduction:
                         # Apply reduction
-                        model = model.reduce_model_balanced_truncation(ranks, dico, method="sqrtm")
+                        model = model.reduce_model_balanced_truncation(ranks, dico, method="sqrtm", randomize=True)
                         model_params = eqx.filter(model, eqx.is_inexact_array)
                         # Reinitialize optimizer
                         opt = create_optimizer(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine, lr_scheduler)

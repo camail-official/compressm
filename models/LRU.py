@@ -137,7 +137,7 @@ class LRULayer(eqx.Module):
         T = _balanced_realization_transformation(P, Q, method, eps)
         return T
 
-    def reduce_balanced_truncation(self, rank, P, Q, method="sqrtm"):
+    def reduce_balanced_truncation(self, rank, P, Q, method="sqrtm", randomize=False):
         """Apply balanced truncation to reduce state dimension."""
         if rank >= self.nu_log.shape[0]:
             raise ValueError("Rank must be smaller than current state dimension.")
@@ -146,7 +146,7 @@ class LRULayer(eqx.Module):
         Lambdas, B, C, D = self.to_lti()
 
         A_red, B_red, C_red = reduce_discrete_LTI(
-            Lambdas, B, C, P, Q, rank=rank
+            Lambdas, B, C, P, Q, rank=rank, method=method, randomize=randomize
         )
 
         # Convert back to LRU parameterization
@@ -213,9 +213,9 @@ class LRUBlock(eqx.Module):
         """Get the dimension of the LRU layer in this block."""
         return self.lru.get_dimension()
     
-    def reduce_balanced_truncation(self, rank, P, Q, method="sqrtm"):
+    def reduce_balanced_truncation(self, rank, P, Q, method="sqrtm", randomize=False):
         """Apply balanced truncation to the LRU layer."""
-        reduced_lru = self.lru.reduce_balanced_truncation(rank, P, Q, method)
+        reduced_lru = self.lru.reduce_balanced_truncation(rank, P, Q, method, randomize)
         return eqx.tree_at(lambda block: block.lru, self, reduced_lru)
 
     def get_reduction_analysis(self, g, hankel_tol=None):
@@ -302,7 +302,7 @@ class LRU(eqx.Module):
             analyses[f'block_{i}'] = block.get_reduction_analysis(dico[f'block_{i}']['g'], hankel_tol=hankel_tol)
         return analyses
     
-    def reduce_model_balanced_truncation(self, ranks, dico, method="sqrtm"):
+    def reduce_model_balanced_truncation(self, ranks, dico, method="sqrtm", randomize=False):
         """Apply balanced truncation to all blocks with specified ranks."""
         if isinstance(ranks, int):
             ranks = [ranks] * len(self.blocks)
@@ -314,7 +314,7 @@ class LRU(eqx.Module):
         i = 0
         for block, rank in zip(self.blocks, ranks):
             if rank < block.lru.nu_log.shape[0]:
-                new_blocks.append(block.reduce_balanced_truncation(rank, dico[f'block_{i}']['P'], dico[f'block_{i}']['Q'], method))
+                new_blocks.append(block.reduce_balanced_truncation(rank, dico[f'block_{i}']['P'], dico[f'block_{i}']['Q'], method, randomize))
             else:
                 new_blocks.append(block)  # No reduction needed
             i += 1

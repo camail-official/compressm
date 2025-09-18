@@ -18,6 +18,7 @@ import os
 import pickle
 from dataclasses import dataclass
 from typing import Dict
+from types import SimpleNamespace
 
 import jax.numpy as jnp
 import jax.random as jr
@@ -26,17 +27,18 @@ import numpy as np
 from data_dir.dataloaders import Dataloader
 from data_dir.generate_coeffs import calc_coeffs
 from data_dir.generate_paths import calc_paths
+from data_dir.lra.lra import IMDB
 
 
 @dataclass
 class Dataset:
     name: str
     raw_dataloaders: Dict[str, Dataloader]
-    coeff_dataloaders: Dict[str, Dataloader]
-    path_dataloaders: Dict[str, Dataloader]
+    coeff_dataloaders: Dict[str, Dataloader] | None
+    path_dataloaders: Dict[str, Dataloader] | None
     data_dim: int
-    logsig_dim: int
-    intervals: jnp.ndarray
+    logsig_dim: int | None
+    intervals: jnp.ndarray | None
     label_dim: int
 
 
@@ -140,12 +142,14 @@ def dataset_generator(
         val_data, val_labels = data[idxs[1]], labels[idxs[1]]
         test_data, test_labels = None, None
 
-    train_paths = batch_calc_paths(train_data, stepsize, depth)
-    val_paths = batch_calc_paths(val_data, stepsize, depth)
-    test_paths = batch_calc_paths(test_data, stepsize, depth)
     intervals = jnp.arange(0, train_data.shape[1], stepsize)
     intervals = jnp.concatenate((intervals, jnp.array([train_data.shape[1]])))
     intervals = intervals * (T / train_data.shape[1])
+
+    train_paths = batch_calc_paths(train_data, stepsize, depth)
+    val_paths = batch_calc_paths(val_data, stepsize, depth)
+    test_paths = batch_calc_paths(test_data, stepsize, depth)
+    logsig_dim = train_paths.shape[-1]
 
     train_coeffs = calc_coeffs(train_data, include_time, T)
     val_coeffs = calc_coeffs(val_data, include_time, T)
@@ -203,19 +207,17 @@ def dataset_generator(
         label_dim = 1
     else:
         label_dim = train_labels.shape[-1]
-    logsig_dim = train_paths.shape[-1]
-
     raw_dataloaders = {
         "train": Dataloader(train_data, train_labels, inmemory),
         "val": Dataloader(val_data, val_labels, inmemory),
         "test": Dataloader(test_data, test_labels, inmemory),
     }
+
     coeff_dataloaders = {
         "train": Dataloader(train_coeff_data, train_labels, inmemory),
         "val": Dataloader(val_coeff_data, val_labels, inmemory),
         "test": Dataloader(test_coeff_data, test_labels, inmemory),
     }
-
     path_dataloaders = {
         "train": Dataloader(train_path_data, train_labels, inmemory),
         "val": Dataloader(val_path_data, val_labels, inmemory),
@@ -446,6 +448,32 @@ def create_mnist_dataset(
         inmemory=False, use_presplit=use_presplit, key=key
     )
 
+def create_imdb_dataset(data_dir, batch_size):
+
+    dataset = IMDB(data_dir=data_dir, _name_="imdb", val_split=0.1)
+    dataset.setup()
+
+    # TODO: allow for setting the batch size in the config later on
+    raw_dataloaders = {
+        "train": dataset.train_dataloader(batch_size=batch_size, shuffle=True),
+        "val": dataset.val_dataloader(batch_size=batch_size, shuffle=False),
+        "test": dataset.test_dataloader(batch_size=batch_size, shuffle=False),
+    }
+
+    return_dict = {
+        "name": "imdb",
+        "raw_dataloaders": raw_dataloaders,
+        "coeff_dataloaders": None,
+        "path_dataloaders": None,
+        "data_dim": 1,
+        "label_dim": 2,
+        "logsig_dim": None,
+        "intervals": None,
+        "vocab_size": dataset.n_tokens,
+    }
+
+    return SimpleNamespace(**return_dict)
+
 
 # keeping this as reference example although not used
 def create_toy_dataset(data_dir, name, stepsize, depth, include_time, T, *, key):
@@ -481,6 +509,7 @@ def create_dataset(
     use_idxs,
     use_presplit,
     stepsize,
+    batch_size,
     depth,
     include_time,
     T,
@@ -496,5 +525,13 @@ def create_dataset(
         return create_mnist_dataset(
             data_dir, use_presplit, stepsize, depth, include_time, T, key=key
         )
+    elif name == "pathfinder":
+        pass
+    elif name == "pathfinderx":
+        pass
+    elif name == "imdb":
+        return create_imdb_dataset(data_dir, batch_size)
+    elif name == "listops":
+        pass
     else:
         raise ValueError(f"Dataset {name} not a valid dataset so you can piss off")

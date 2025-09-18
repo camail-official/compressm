@@ -41,6 +41,7 @@ def run_experiments(model_names, dataset_names, experiment_folder):
             print_steps = data["print_steps"]
             batch_size = data["batch_size"]
             metric = data["metric"]
+            use_embedding = data["use_embedding"]
             if model_name == 'LinOSS':
                 linoss_discretization = data["linoss_discretization"]
             else:
@@ -108,6 +109,7 @@ def run_experiments(model_names, dataset_names, experiment_folder):
                 "stepsize_controller": diffrax.ConstantStepSize(),
                 "scale": scale,
                 "lambd": lambd,
+                "use_embedding": use_embedding,
             }
             run_args = {
                 "data_dir": data_dir,
@@ -134,7 +136,7 @@ def run_experiments(model_names, dataset_names, experiment_folder):
                 "use_warmup_cosine": use_warmup_cosine,
                 "ssm_lr_factor": ssm_lr_factor,
                 "tol": tol,
-                "red_steps": red_steps,
+                "red_steps": red_steps
             }
             run_fn = create_dataset_model_and_train
 

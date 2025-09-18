@@ -242,6 +242,8 @@ class LRU(eqx.Module):
         output_dim,
         classification,
         output_step,
+        use_embedding,
+        vocab_size=None,
         # TODO: make the radii input parameters
         r_min=0.9,
         r_max=0.999,
@@ -253,7 +255,10 @@ class LRU(eqx.Module):
         linear_encoder_key, *block_keys, linear_layer_key = jr.split(
             key, num_blocks + 2
         )
-        self.linear_encoder = eqx.nn.Linear(data_dim, H, key=linear_encoder_key)
+        if use_embedding:
+            self.linear_encoder = eqx.nn.Embedding(vocab_size, H, key=linear_encoder_key)
+        else:
+            self.linear_encoder = eqx.nn.Linear(data_dim, H, key=linear_encoder_key)
         self.blocks = [
             LRUBlock(N, H, r_min, r_max, max_phase, drop_rate, key=key)
             for key in block_keys

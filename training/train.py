@@ -54,6 +54,7 @@ import jax.random as jr
 from data_dir.datasets import create_dataset
 from models.generate_model import create_model
 from training.train_utils import create_optimizer, truncate_optimizer_state, classification_loss, regression_loss, calc_output, make_step
+from data_dir.lra.registry import LRA_REGISTRY
 
 from tqdm import tqdm
 
@@ -153,7 +154,13 @@ def train_model(
             dataloaders["train"].loop(batch_size, key=batchkey),
         ):
             stepkey, key = jr.split(key, 2)
-            X, y = data
+            if dataset_name in LRA_REGISTRY:
+                X, y, _ = data
+                X = jnp.array(X)
+                y = jnp.array(y)
+            else:
+                X, y = data
+            
             model, state, opt_state, value = make_step(
                 model, filter_spec, X, y, loss_fn, state, opt, opt_state, stepkey, use_multi_optimizer=(ssm_lr_factor != 1.0)
             )
@@ -166,7 +173,12 @@ def train_model(
                 for data in dataloaders["train"].loop_epoch(batch_size):
                     stepkey, key = jr.split(key, 2)
                     inference_model = eqx.tree_inference(model, value=True)
-                    X, y = data
+                    if dataset_name in LRA_REGISTRY:
+                        X, y, _ = data
+                        X = jnp.array(X)
+                        y = jnp.array(y)
+                    else:
+                        X, y = data
                     prediction, _ = calc_output(
                         inference_model,
                         X,
@@ -197,7 +209,10 @@ def train_model(
                 for data in dataloaders["val"].loop_epoch(batch_size):
                     stepkey, key = jr.split(key, 2)
                     inference_model = eqx.tree_inference(model, value=True)
-                    X, y = data
+                    if dataset_name in LRA_REGISTRY:
+                        X, y, _ = data
+                    else:
+                        X, y = data
                     prediction, _ = calc_output(
                         inference_model,
                         X,
@@ -286,7 +301,12 @@ def train_model(
                     for data in dataloaders["test"].loop_epoch(batch_size):
                         stepkey, key = jr.split(key, 2)
                         inference_model = eqx.tree_inference(model, value=True)
-                        X, y = data
+                        if dataset_name in LRA_REGISTRY:
+                            X, y, _ = data
+                            X = jnp.array(X)
+                            y = jnp.array(y)
+                        else:
+                            X, y = data
                         prediction, _ = calc_output(
                             inference_model,
                             X,
@@ -366,6 +386,7 @@ def create_dataset_model_and_train(
     T,
     model_name,
     stepsize,
+    batch_size,
     logsig_depth,
     linoss_discretization,
     model_args,
@@ -373,7 +394,6 @@ def create_dataset_model_and_train(
     print_steps,
     lr,
     lr_scheduler,
-    batch_size,
     output_parent_dir="",
     id=None,
     data=None,
@@ -381,14 +401,14 @@ def create_dataset_model_and_train(
     use_warmup_cosine=False,
     ssm_lr_factor=1.0,
     tol=None,
-    red_steps=0
+    red_steps=0,
 ):
     if model_name == 'LinOSS':
         model_name_directory = model_name+'_'+linoss_discretization
     else:
         model_name_directory = model_name
     output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name
-    output_dir = f"T_{T:.2f}_time_{include_time}_nsteps_{num_steps}_lr_{lr}"
+    output_dir = f"T_{T:.2f}_time_{include_time}_lr_{lr}"
     if model_name == "log_ncde" or model_name == "nrde":
         output_dir += f"_stepsize_{stepsize:.2f}_depth_{logsig_depth}"
     for k, v in model_args.items():
@@ -416,6 +436,7 @@ def create_dataset_model_and_train(
         data_dir,
         dataset_name,
         stepsize=stepsize,
+        batch_size=batch_size,
         depth=logsig_depth,
         include_time=include_time,
         T=T,
@@ -424,8 +445,15 @@ def create_dataset_model_and_train(
         key=datasetkey,
     )
 
+    # ugly quick hack
+    try:
+        model_args["vocab_size"] = dataset.vocab_size
+    except AttributeError:
+        pass
+
     print(f"Creating model {model_name}")
     classification = metric == "accuracy"
+    print(dataset)
     model, state = create_model(
         model_name,
         dataset.data_dim,

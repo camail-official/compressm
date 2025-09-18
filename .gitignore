@@ -1,0 +1,14 @@
+data/
+*.so
+*.egg-info/
+*.out
+*.pyc
+wandb/
+*__pycache__*
+**/__pycache__/
+test.ipynb
+
+.venv
+outputs
+checkpoint
+data

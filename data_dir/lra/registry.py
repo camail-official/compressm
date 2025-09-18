@@ -1,0 +1,1 @@
+LRA_REGISTRY = ["aan", "pathfinder", "pathfinderx", "imdb", "listops"]

@@ -72,6 +72,8 @@ def create_model(
     scale=1.0,
     lambd=0.0,
     linoss_discretization='IM',
+    use_embedding=False,
+    vocab_size=None,
     *,
     key,
 ):
@@ -156,6 +158,8 @@ def create_model(
             label_dim,
             classification,
             output_step,
+            use_embedding,
+            vocab_size=vocab_size,
             key=key,
         )
         state = eqx.nn.State(lru)

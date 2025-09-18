@@ -29,8 +29,10 @@ def run_experiments(model_names, dataset_names, experiment_folder):
 
     for model_name in model_names:
         for dataset_name in dataset_names:
+            dataset_dir = dataset_name
+            dataset_name = dataset_name.split('/')[0]
             with open(
-                experiment_folder + f"/{model_name}/{dataset_name}.json", "r"
+                experiment_folder + f"/{model_name}/{dataset_dir}.json", "r"
             ) as file:
                 data = json.load(file)
 
@@ -156,6 +158,7 @@ def run_experiments(model_names, dataset_names, experiment_folder):
 
                 print(f"Running experiment with seed: {seed}")
                 run_fn(seed=seed, **run_args)
+                wandb.finish()
 
 
 if __name__ == "__main__":

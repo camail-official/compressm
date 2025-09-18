@@ -534,4 +534,4 @@ def create_dataset(
     elif name == "listops":
         pass
     else:
-        raise ValueError(f"Dataset {name} not a valid dataset so you can piss off")
+        raise ValueError(f"Dataset {name} not a valid dataset")

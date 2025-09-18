@@ -11,6 +11,7 @@
   "lr_scheduler": "lambda lr: lr",
   "num_steps": 180000,
   "print_steps": 4500,
+  "log_steps": 100,
   "batch_size": 50,
   "model_name": "lru",
   "metric": "accuracy",
@@ -30,5 +31,10 @@
   "ssm_lr_factor": 0.25,
   "tol": -1,
   "red_steps": 18000,
-  "use_embedding": false
+  "use_embedding": false,
+  "drop_rate": 0.1,
+  "wandb": {
+    "project": "compressm-LRU",
+    "entity": "camail"
+  }
 }

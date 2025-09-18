@@ -23,6 +23,7 @@ import argparse
 import json
 import diffrax
 from training.train import create_dataset_model_and_train
+import wandb
 
 def run_experiments(model_names, dataset_names, experiment_folder):
 
@@ -40,7 +41,9 @@ def run_experiments(model_names, dataset_names, experiment_folder):
             num_steps = data["num_steps"]
             print_steps = data["print_steps"]
             batch_size = data["batch_size"]
+            log_steps = data["log_steps"]
             metric = data["metric"]
+            drop_rate = data["drop_rate"]
             use_embedding = data["use_embedding"]
             if model_name == 'LinOSS':
                 linoss_discretization = data["linoss_discretization"]
@@ -96,7 +99,6 @@ def run_experiments(model_names, dataset_names, experiment_folder):
             if tol <= 0.0:
                 tol = None
             red_steps = data.get("red_steps", 0)
-
             model_args = {
                 "num_blocks": num_blocks,
                 "hidden_dim": hidden_dim,
@@ -110,6 +112,7 @@ def run_experiments(model_names, dataset_names, experiment_folder):
                 "scale": scale,
                 "lambd": lambd,
                 "use_embedding": use_embedding,
+                "drop_rate": drop_rate,
             }
             run_args = {
                 "data_dir": data_dir,
@@ -126,6 +129,7 @@ def run_experiments(model_names, dataset_names, experiment_folder):
                 "model_args": model_args,
                 "num_steps": num_steps,
                 "print_steps": print_steps,
+                "log_steps": log_steps,
                 "lr": lr,
                 "lr_scheduler": lr_scheduler,
                 "batch_size": batch_size,
@@ -141,6 +145,15 @@ def run_experiments(model_names, dataset_names, experiment_folder):
             run_fn = create_dataset_model_and_train
 
             for seed in seeds:
+                if "wandb" in data:
+                    wandb_name = f"{model_name}-{dataset_name}-{seed}-{data['tol']}"
+                    wandb.init(
+                        project=data["wandb"]["project"],
+                        entity=data["wandb"]["entity"],
+                        name=wandb_name,
+                        config=data
+                    )
+
                 print(f"Running experiment with seed: {seed}")
                 run_fn(seed=seed, **run_args)
 

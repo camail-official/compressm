@@ -50,13 +50,22 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import wandb
 
 from data_dir.datasets import create_dataset
 from models.generate_model import create_model
-from training.train_utils import create_optimizer, truncate_optimizer_state, classification_loss, regression_loss, calc_output, make_step
+from training.train_utils import (
+    create_optimizer,
+    truncate_optimizer_state,
+    classification_loss,
+    regression_loss,
+    calc_output,
+    make_step,
+)
 from data_dir.lra.registry import LRA_REGISTRY
 
 from tqdm import tqdm
+
 
 def train_model(
     dataset_name,
@@ -67,6 +76,7 @@ def train_model(
     dataloaders,
     num_steps,
     print_steps,
+    log_steps,
     lr,
     lr_scheduler,
     batch_size,
@@ -77,7 +87,7 @@ def train_model(
     weight_decay=0.01,
     use_warmup_cosine=False,
     ssm_lr_factor=1.0,
-    model_name='lru',
+    model_name="lru",
     tol=None,
     red_steps=1e10,
 ):
@@ -107,7 +117,16 @@ def train_model(
 
     batchkey, key = jr.split(key, 2)
 
-    opt = create_optimizer(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine, lr_scheduler, verbose=True)
+    opt = create_optimizer(
+        model_name,
+        lr,
+        ssm_lr_factor,
+        weight_decay,
+        num_steps,
+        use_warmup_cosine,
+        lr_scheduler,
+        verbose=True,
+    )
 
     # Initialize optimizer state with proper parameter wrapping
     model_params = eqx.filter(model, eqx.is_inexact_array)
@@ -145,7 +164,7 @@ def train_model(
     hankel_singular_values = {}
 
     for blc, block in enumerate(model.blocks):
-        if hasattr(block, 'lru'):
+        if hasattr(block, "lru"):
             ssm_dimensions[blc] = block.get_dimension()
 
     with tqdm(total=num_steps, desc="Training", ncols=140) as pbar:
@@ -160,12 +179,22 @@ def train_model(
                 y = jnp.array(y)
             else:
                 X, y = data
-            
+
             model, state, opt_state, value = make_step(
-                model, filter_spec, X, y, loss_fn, state, opt, opt_state, stepkey, use_multi_optimizer=(ssm_lr_factor != 1.0)
+                model,
+                filter_spec,
+                X,
+                y,
+                loss_fn,
+                state,
+                opt,
+                opt_state,
+                stepkey,
+                use_multi_optimizer=(ssm_lr_factor != 1.0),
             )
             running_loss += value
-            
+
+            # compute the training metric
             if (step + 1) % print_steps == 0:
                 # Compute training metric
                 predictions = []
@@ -197,7 +226,9 @@ def train_model(
                     )
                 else:
                     prediction = prediction[:, :, 0]
-                    train_metric = jnp.mean(jnp.mean((prediction - y) ** 2, axis=1), axis=0)
+                    train_metric = jnp.mean(
+                        jnp.mean((prediction - y) ** 2, axis=1), axis=0
+                    )
                 # if the training metric is less than 0.15 kill training run
                 if train_metric < 0.15:
                     has_crashed = True
@@ -231,10 +262,11 @@ def train_model(
                     )
                 else:
                     prediction = prediction[:, :, 0]
-                    val_metric = jnp.mean(jnp.mean((prediction - y) ** 2, axis=1), axis=0)
+                    val_metric = jnp.mean(
+                        jnp.mean((prediction - y) ** 2, axis=1), axis=0
+                    )
                 end = time.time()
                 total_time = end - start
-
 
                 ### Dimensionality reduction ###
                 dico = model.get_all_hankel_singular_values()
@@ -244,15 +276,17 @@ def train_model(
 
                 if tol is not None and step < red_steps + 1:
                     # Get reduction analysis for all blocks
-                    reduction_analysis = model.get_reduction_analysis(dico, hankel_tol=tol)
+                    reduction_analysis = model.get_reduction_analysis(
+                        dico, hankel_tol=tol
+                    )
 
                     # Extract (1-tol)% threshold ranks for each block
                     ranks = []
                     for i, block in enumerate(model.blocks):
-                        block_analysis = reduction_analysis[f'block_{i}']
-                        rank = block_analysis['recommended_ranks']['threshold']
+                        block_analysis = reduction_analysis[f"block_{i}"]
+                        rank = block_analysis["recommended_ranks"]["threshold"]
                         current_rank = block.get_dimension()
-                    
+
                         # Only reduce if there's meaningful compression
                         if rank < current_rank * 0.95:  # At least 5% reduction
                             reduction = True
@@ -261,11 +295,11 @@ def train_model(
 
                             # Record the reduction
                             reduction_info = {
-                                'step': step,
-                                'block': i,
-                                'old_dim': current_rank,
-                                'new_dim': rank,
-                                'error_bound': None,  # Add this if available from reduce_discrete_LTI
+                                "step": step,
+                                "block": i,
+                                "old_dim": current_rank,
+                                "new_dim": rank,
+                                "error_bound": None,  # Add this if available from reduce_discrete_LTI
                             }
                             reduction_history.append(reduction_info)
                             # Update dimensions tracker
@@ -273,15 +307,29 @@ def train_model(
 
                         else:
                             ranks.append(current_rank)  # No reduction
-                    
+
                     if reduction:
                         # Apply reduction
-                        model = model.reduce_model_balanced_truncation(ranks, dico, method="sqrtm")
+                        model = model.reduce_model_balanced_truncation(
+                            ranks, dico, method="sqrtm"
+                        )
                         model_params = eqx.filter(model, eqx.is_inexact_array)
                         # Reinitialize optimizer
-                        opt = create_optimizer(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine, lr_scheduler)
+                        opt = create_optimizer(
+                            model_name,
+                            lr,
+                            ssm_lr_factor,
+                            weight_decay,
+                            num_steps,
+                            use_warmup_cosine,
+                            lr_scheduler,
+                        )
                         # For multi-optimizer, wrap parameters in length-1 list, For single optimizer, use parameters directly
-                        new_opt_state = opt.init([model_params]) if ssm_lr_factor != 1.0 else opt.init(model_params)
+                        new_opt_state = (
+                            opt.init([model_params])
+                            if ssm_lr_factor != 1.0
+                            else opt.init(model_params)
+                        )
                         # Truncate/copy old state into new for learning optimization continuity
                         opt_state = truncate_optimizer_state(opt_state, new_opt_state)
 
@@ -294,7 +342,10 @@ def train_model(
 
                 # overwrite the test metric if the validation improves or if the model has been reduced
                 # this ensures the best model is restrained to the latest reduced model size
-                if operator_improv(val_metric, best_val(val_metric_for_best_model)) or reduction:
+                if (
+                    operator_improv(val_metric, best_val(val_metric_for_best_model))
+                    or reduction
+                ):
                     val_metric_for_best_model.append(val_metric)
                     predictions = []
                     labels = []
@@ -333,15 +384,36 @@ def train_model(
                     no_val_improvement = 0
 
                 # Update progress bar with metrics
-                pbar.set_postfix({
-                    'Loss': f'{running_loss:.2f}',
-                    'Train': f'{train_metric:.2f}',
-                    'Val': f'{val_metric:.2f}',
-                    'Top test': f'{test_metric:.2f} at step: {best_step}',
-                    'Avg dim': f'{int(sum(ranks)/len(ranks))}' if 'ranks' in locals() else f'{ssm_dimensions[0]}',
-                })
+                pbar.set_postfix(
+                    {
+                        "Loss": f"{running_loss:.2f}",
+                        "Train": f"{train_metric:.2f}",
+                        "Val": f"{val_metric:.2f}",
+                        "Top test": f"{test_metric:.2f} at step: {best_step}",
+                        "Avg dim": (
+                            f"{int(sum(ranks)/len(ranks))}"
+                            if "ranks" in locals()
+                            else f"{ssm_dimensions[0]}"
+                        ),
+                    }
+                )
 
-                
+                # log metrics to wandb
+                if (step + 1) % log_steps == 0:
+                    wandb.log(
+                        {
+                            "loss": running_loss,
+                            "train/metric": train_metric,
+                            "val/metric": val_metric,
+                            "test/metric": test_metric,
+                            "avg_dim": (
+                                int(sum(ranks) / len(ranks))
+                                if "ranks" in locals()
+                                else ssm_dimensions[0]
+                            ),
+                        }
+                    )
+
                 # Performance metrics
                 all_train_metric.append(train_metric)
                 all_val_metric.append(val_metric)
@@ -358,11 +430,20 @@ def train_model(
                 jnp.save(output_dir + "/test_metric.npy", test_metric_save)
 
                 # Dimensionality reduction metrics
-                np.save(output_dir + "/all_hankel_singular_values.npy", hankel_singular_values)
-                np.save(output_dir + "/reduction_history.npy", np.array(reduction_history, dtype=object))
-                np.save(output_dir + "/ssm_dimensions.npy", np.array(list(ssm_dimensions.items()), dtype=object))
+                np.save(
+                    output_dir + "/all_hankel_singular_values.npy",
+                    hankel_singular_values,
+                )
+                np.save(
+                    output_dir + "/reduction_history.npy",
+                    np.array(reduction_history, dtype=object),
+                )
+                np.save(
+                    output_dir + "/ssm_dimensions.npy",
+                    np.array(list(ssm_dimensions.items()), dtype=object),
+                )
                 running_loss = 0.0
-            
+
             pbar.update(1)
 
     if has_crashed:
@@ -370,7 +451,9 @@ def train_model(
     elif has_stagnated:
         print(f"Training has stagnated and stopped early at step {step + 1}.")
     else:
-        print(f"Training completed successfully with best test metric: {test_metric:.2f} at step {best_step}.")
+        print(
+            f"Training completed successfully with best test metric: {test_metric:.2f} at step {best_step}."
+        )
 
     return model
 
@@ -402,9 +485,10 @@ def create_dataset_model_and_train(
     ssm_lr_factor=1.0,
     tol=None,
     red_steps=0,
+    log_steps=100,
 ):
-    if model_name == 'LinOSS':
-        model_name_directory = model_name+'_'+linoss_discretization
+    if model_name == "LinOSS":
+        model_name_directory = model_name + "_" + linoss_discretization
     else:
         model_name_directory = model_name
     output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name
@@ -492,6 +576,7 @@ def create_dataset_model_and_train(
         dataloaders,
         num_steps,
         print_steps,
+        log_steps,
         lr,
         lr_scheduler,
         batch_size,
@@ -504,5 +589,5 @@ def create_dataset_model_and_train(
         ssm_lr_factor=ssm_lr_factor,
         tol=tol,
         red_steps=red_steps,
-        model_name=model_name
+        model_name=model_name,
     )

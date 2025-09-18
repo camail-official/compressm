@@ -64,6 +64,7 @@ def create_model(
     classification=True,
     output_step=1,
     ssm_dim=None,
+    drop_rate=0.1,
     ssm_blocks=None,
     solver=diffrax.Heun(),
     stepsize_controller=diffrax.ConstantStepSize(),
@@ -160,6 +161,7 @@ def create_model(
             output_step,
             use_embedding,
             vocab_size=vocab_size,
+            drop_rate=drop_rate,
             key=key,
         )
         state = eqx.nn.State(lru)

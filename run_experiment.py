@@ -148,7 +148,7 @@ def run_experiments(model_names, dataset_names, experiment_folder):
 
             for seed in seeds:
                 if "wandb" in data:
-                    wandb_name = f"{model_name}-{dataset_name}-{seed}-{data['tol']}"
+                    wandb_name = f"{model_name}-{dataset_name}-{seed}-{data['ssm_dim']}-{data['tol']}"
                     wandb.init(
                         project=data["wandb"]["project"],
                         entity=data["wandb"]["entity"],

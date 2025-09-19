@@ -1,6 +1,6 @@
-executable = /home/pnazari/cluster/htcondor/cuda_wrapper.sh
+executable = /home/pnazari/cluster/htcondor/empty_wrapper.sh
 initialdir = /home/pnazari/workspace/compressm
-arguments = /home/pnazari/.local/bin/uv run --no-sync -m run_experiment --dataset_name imdb/non-reduced/imdb-$(dim)
+arguments = /home/pnazari/.local/bin/uv run --no-sync -m run_experiment --dataset_name imdb/reduced/imdb-192-8-1e-1
 error = outputs/$(Cluster)_$(Process).err
 output = outputs/$(Cluster)_$(Process).out
 log = outputs/$(Cluster)_$(Process).log
@@ -11,4 +11,4 @@ requirements = TARGET.CUDAGlobalMemoryMb > 64000
 MaxTime = 288000
 periodic_remove = (JobStatus =?= 2) && ((CurrentTime - JobCurrentStartDate) >= $(MaxTime))
 
-queue dim in (192, 128, 64, 32, 16)
+queue

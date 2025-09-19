@@ -27,7 +27,7 @@ import numpy as np
 from data_dir.dataloaders import Dataloader
 from data_dir.generate_coeffs import calc_coeffs
 from data_dir.generate_paths import calc_paths
-from data_dir.lra.lra import IMDB
+from data_dir.lra.lra import IMDB, AAN, ListOps, PathFinder
 
 
 @dataclass
@@ -242,16 +242,20 @@ def create_scifar_dataset(
     import torchvision.transforms as transforms
 
     # Transform: ToTensor + Normalize + Reshape to (1024, 3)
-    transform = transforms.Compose([
-        transforms.ToTensor(),  # (32,32,3) -> (3,32,32) and /255
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        transforms.Lambda(lambda x: x.view(3, 1024).t())  # (3,32,32) -> (1024,3)
-    ])
+    transform = transforms.Compose(
+        [
+            transforms.ToTensor(),  # (32,32,3) -> (3,32,32) and /255
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            transforms.Lambda(lambda x: x.view(3, 1024).t()),  # (3,32,32) -> (1024,3)
+        ]
+    )
 
     trainset = torchvision.datasets.CIFAR10(
-        root='./data', train=True, download=True, transform=transform)
+        root="./data", train=True, download=True, transform=transform
+    )
     testset = torchvision.datasets.CIFAR10(
-        root='./data', train=False, download=True, transform=transform)
+        root="./data", train=False, download=True, transform=transform
+    )
 
     # Apply transforms by iterating through dataset
     x_train = []
@@ -260,7 +264,7 @@ def create_scifar_dataset(
         img, label = trainset[i]  # This applies the transform!
         x_train.append(img.numpy())
         y_train.append(label)
-    
+
     x_test = []
     y_test = []
     for i in range(len(testset)):
@@ -271,7 +275,7 @@ def create_scifar_dataset(
     # Convert lists to arrays
     x_train = np.array(x_train)  # Shape: (50000, 1024, 3)
     y_train = np.array(y_train)
-    x_test = np.array(x_test)    # Shape: (10000, 1024, 3)
+    x_test = np.array(x_test)  # Shape: (10000, 1024, 3)
     y_test = np.array(y_test)
 
     # Convert to JAX arrays
@@ -279,7 +283,7 @@ def create_scifar_dataset(
     x_test = jnp.array(x_test)
     y_train = jnp.array(y_train)
     y_test = jnp.array(y_test)
-    
+
     # Create one-hot labels
     train_onehot = jnp.zeros((len(y_train), 10))
     train_onehot = train_onehot.at[jnp.arange(len(y_train)), y_train].set(1)
@@ -292,19 +296,19 @@ def create_scifar_dataset(
         n_train = len(x_train)
         val_size = int(0.1 * n_train)  # 10% for validation
         train_size = n_train - val_size
-        
+
         idxs = jr.permutation(split_key, n_train)
         train_idxs = idxs[:train_size]
         val_idxs = idxs[train_size:]
-        
+
         train_data = x_train[train_idxs]
         val_data = x_train[val_idxs]
         test_data = x_test
-        
+
         train_labels = train_onehot[train_idxs]
         val_labels = train_onehot[val_idxs]
         test_labels = test_onehot
-        
+
         data = (train_data, val_data, test_data)
         labels = (train_labels, val_labels, test_labels)
     else:
@@ -318,17 +322,17 @@ def create_scifar_dataset(
                 jnp.arange(train_data.shape[1])[None, :], train_data.shape[0], axis=0
             )
             train_data = jnp.concatenate([ts_train[:, :, None], train_data], axis=2)
-            
+
             ts_val = (T / val_data.shape[1]) * jnp.repeat(
                 jnp.arange(val_data.shape[1])[None, :], val_data.shape[0], axis=0
             )
             val_data = jnp.concatenate([ts_val[:, :, None], val_data], axis=2)
-            
+
             ts_test = (T / test_data.shape[1]) * jnp.repeat(
                 jnp.arange(test_data.shape[1])[None, :], test_data.shape[0], axis=0
             )
             test_data = jnp.concatenate([ts_test[:, :, None], test_data], axis=2)
-            
+
             data = (train_data, val_data, test_data)
         else:
             ts = (T / data.shape[1]) * jnp.repeat(
@@ -337,8 +341,16 @@ def create_scifar_dataset(
             data = jnp.concatenate([ts[:, :, None], data], axis=2)
 
     return dataset_generator(
-        "scifar", data, labels, stepsize, depth, include_time, T, 
-        inmemory=False, use_presplit=use_presplit, key=key
+        "scifar",
+        data,
+        labels,
+        stepsize,
+        depth,
+        include_time,
+        T,
+        inmemory=False,
+        use_presplit=use_presplit,
+        key=key,
     )
 
 
@@ -348,18 +360,19 @@ def create_mnist_dataset(
     import torchvision
     import torchvision.transforms as transforms
 
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Lambda(lambda x: x.view(1, 784).t())
-    ])
+    transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.Lambda(lambda x: x.view(1, 784).t())]
+    )
     transform_train = transform_test = transform
 
     trainset = torchvision.datasets.MNIST(
-        root='./data', train=True, download=True, transform=transform_train)
+        root="./data", train=True, download=True, transform=transform_train
+    )
 
     testset = torchvision.datasets.MNIST(
-        root='./data', train=False, download=True, transform=transform_test)
-    
+        root="./data", train=False, download=True, transform=transform_test
+    )
+
     # Apply transforms by iterating through dataset
     x_train = []
     y_train = []
@@ -367,7 +380,7 @@ def create_mnist_dataset(
         img, label = trainset[i]  # This applies the transform!
         x_train.append(img.numpy())
         y_train.append(label)
-    
+
     x_test = []
     y_test = []
     for i in range(len(testset)):
@@ -378,7 +391,7 @@ def create_mnist_dataset(
     # Convert lists to arrays
     x_train = np.array(x_train)  # Shape: (60000, 784, 1)
     y_train = np.array(y_train)
-    x_test = np.array(x_test)    # Shape: (10000, 784, 1)
+    x_test = np.array(x_test)  # Shape: (10000, 784, 1)
     y_test = np.array(y_test)
 
     # Convert to JAX arrays
@@ -386,32 +399,32 @@ def create_mnist_dataset(
     x_test = jnp.array(x_test)
     y_train = jnp.array(y_train)
     y_test = jnp.array(y_test)
-    
+
     # Create one-hot labels
     train_onehot = jnp.zeros((len(y_train), 10))
     train_onehot = train_onehot.at[jnp.arange(len(y_train)), y_train].set(1)
     test_onehot = jnp.zeros((len(y_test), 10))
     test_onehot = test_onehot.at[jnp.arange(len(y_test)), y_test].set(1)
-    
+
     if use_presplit:
         # Use presplit train/test, split train into train/val
         split_key, key = jr.split(key)
         n_train = len(x_train)
         val_size = int(0.10 * n_train)  # 10% for validation
         train_size = n_train - val_size
-        
+
         idxs = jr.permutation(split_key, n_train)
         train_idxs = idxs[:train_size]
         val_idxs = idxs[train_size:]
-        
+
         train_data = x_train[train_idxs]
         val_data = x_train[val_idxs]
         test_data = x_test
-        
+
         train_labels = train_onehot[train_idxs]
         val_labels = train_onehot[val_idxs]
         test_labels = test_onehot
-        
+
         data = (train_data, val_data, test_data)
         labels = (train_labels, val_labels, test_labels)
     else:
@@ -425,17 +438,17 @@ def create_mnist_dataset(
                 jnp.arange(train_data.shape[1])[None, :], train_data.shape[0], axis=0
             )
             train_data = jnp.concatenate([ts_train[:, :, None], train_data], axis=2)
-            
+
             ts_val = (T / val_data.shape[1]) * jnp.repeat(
                 jnp.arange(val_data.shape[1])[None, :], val_data.shape[0], axis=0
             )
             val_data = jnp.concatenate([ts_val[:, :, None], val_data], axis=2)
-            
+
             ts_test = (T / test_data.shape[1]) * jnp.repeat(
                 jnp.arange(test_data.shape[1])[None, :], test_data.shape[0], axis=0
             )
             test_data = jnp.concatenate([ts_test[:, :, None], test_data], axis=2)
-            
+
             data = (train_data, val_data, test_data)
         else:
             ts = (T / data.shape[1]) * jnp.repeat(
@@ -444,13 +457,134 @@ def create_mnist_dataset(
             data = jnp.concatenate([ts[:, :, None], data], axis=2)
 
     return dataset_generator(
-        "mnist", data, labels, stepsize, depth, include_time, T, 
-        inmemory=False, use_presplit=use_presplit, key=key
+        "mnist",
+        data,
+        labels,
+        stepsize,
+        depth,
+        include_time,
+        T,
+        inmemory=False,
+        use_presplit=use_presplit,
+        key=key,
     )
+
 
 def create_imdb_dataset(data_dir, batch_size):
 
     dataset = IMDB(data_dir=data_dir, _name_="imdb", val_split=0.1)
+    dataset.setup()
+
+    # TODO: allow for setting the batch size in the config later on
+    raw_dataloaders = {
+        "train": dataset.train_dataloader(batch_size=batch_size, shuffle=True),
+        "val": dataset.val_dataloader(batch_size=batch_size, shuffle=False),
+        "test": dataset.test_dataloader(batch_size=batch_size, shuffle=False),
+    }
+
+    return_dict = {
+        "name": "imdb",
+        "raw_dataloaders": raw_dataloaders,
+        "coeff_dataloaders": None,
+        "path_dataloaders": None,
+        "data_dim": 1,
+        "label_dim": 2,
+        "logsig_dim": None,
+        "intervals": None,
+        "vocab_size": dataset.n_tokens,
+    }
+
+    return SimpleNamespace(**return_dict)
+
+
+def create_aan_dataset(data_dir, batch_size):
+
+    dataset = AAN(data_dir=data_dir, _name_="aan", val_split=0.1)
+    dataset.setup()
+
+    # TODO: allow for setting the batch size in the config later on
+    raw_dataloaders = {
+        "train": dataset.train_dataloader(batch_size=batch_size, shuffle=True),
+        "val": dataset.val_dataloader(batch_size=batch_size, shuffle=False),
+        "test": dataset.test_dataloader(batch_size=batch_size, shuffle=False),
+    }
+
+    return_dict = {
+        "name": "imdb",
+        "raw_dataloaders": raw_dataloaders,
+        "coeff_dataloaders": None,
+        "path_dataloaders": None,
+        "data_dim": 1,
+        "label_dim": 2,
+        "logsig_dim": None,
+        "intervals": None,
+        "vocab_size": dataset.n_tokens,
+    }
+
+    return SimpleNamespace(**return_dict)
+
+
+def create_listops_dataset(data_dir, batch_size):
+
+    dataset = ListOps(data_dir=data_dir, _name_="listops", val_split=0.1)
+    dataset.setup()
+
+    # TODO: allow for setting the batch size in the config later on
+    raw_dataloaders = {
+        "train": dataset.train_dataloader(batch_size=batch_size, shuffle=True),
+        "val": dataset.val_dataloader(batch_size=batch_size, shuffle=False),
+        "test": dataset.test_dataloader(batch_size=batch_size, shuffle=False),
+    }
+
+    return_dict = {
+        "name": "imdb",
+        "raw_dataloaders": raw_dataloaders,
+        "coeff_dataloaders": None,
+        "path_dataloaders": None,
+        "data_dim": 1,
+        "label_dim": 10,
+        "logsig_dim": None,
+        "intervals": None,
+        "vocab_size": dataset.n_tokens,
+    }
+
+    return SimpleNamespace(**return_dict)
+
+
+def create_pathfinder_dataset(data_dir, batch_size):
+
+    dataset = PathFinder(
+        data_dir=data_dir, _name_="pathfinder", val_split=0.1, resolution=32
+    )
+    dataset.setup()
+
+    # TODO: allow for setting the batch size in the config later on
+    raw_dataloaders = {
+        "train": dataset.train_dataloader(batch_size=batch_size, shuffle=True),
+        "val": dataset.val_dataloader(batch_size=batch_size, shuffle=False),
+        "test": dataset.test_dataloader(batch_size=batch_size, shuffle=False),
+    }
+
+    return_dict = {
+        "name": "imdb",
+        "raw_dataloaders": raw_dataloaders,
+        "coeff_dataloaders": None,
+        "path_dataloaders": None,
+        "data_dim": 1,
+        "label_dim": 2,
+        "logsig_dim": None,
+        "intervals": None,
+        "vocab_size": dataset.n_tokens,
+    }
+
+    return SimpleNamespace(**return_dict)
+
+
+def create_pathfinderx_dataset(data_dir, batch_size):
+
+    dataset = PathFinder(
+        data_dir=data_dir, _name_="pathfinder", val_split=0.1, resolution=128
+    )
     dataset.setup()
 
     # TODO: allow for setting the batch size in the config later on
@@ -503,6 +637,7 @@ def create_toy_dataset(data_dir, name, stepsize, depth, include_time, T, *, key)
         "toy", data, onehot_labels, stepsize, depth, include_time, T, idxs, key=key
     )
 
+
 def create_dataset(
     data_dir,
     name,
@@ -526,12 +661,15 @@ def create_dataset(
             data_dir, use_presplit, stepsize, depth, include_time, T, key=key
         )
     elif name == "pathfinder":
+        return create_pathfinder_dataset(data_dir, batch_size)
         pass
     elif name == "pathfinderx":
-        pass
+        return create_pathfinderx_dataset(data_dir, batch_size)
     elif name == "imdb":
         return create_imdb_dataset(data_dir, batch_size)
+    elif name == "aan":
+        return create_aan_dataset(data_dir, batch_size)
     elif name == "listops":
-        pass
+        return create_listops_dataset(data_dir, batch_size)
     else:
         raise ValueError(f"Dataset {name} not a valid dataset")

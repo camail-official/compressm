@@ -14,13 +14,10 @@ class PyTorchDataloaderWrapper(DataLoader):
                   Note: Do not pass batch_size, shuffle, or drop_last here, as they are handled internally.
     """
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(num_workers=0, pin_memory=True, **kwargs)
         self.kwargs = kwargs
 
         self.size = len(self.dataset)
-
-    # def __iter__(self):
-    #    raise RuntimeError("Use .loop() instead of __iter__")
 
     def loop(self, *args, **kwargs):
         if self.kwargs["batch_size"] == self.kwargs["dataset"].__len__():

@@ -27,7 +27,7 @@ class IMDB(SequenceDataset):
     def init_defaults(self):
         return {
             "l_max": 4096,
-            "fixed_size": False,
+            "fixed_size": True,
             "level": "char",
             "min_freq": 15,
             "seed": 42,
@@ -81,6 +81,8 @@ class IMDB(SequenceDataset):
 
     def _collate_fn(self, batch):
         xs, ys = zip(*[(data["input_ids"], data["label"]) for data in batch])
+        #xs = batch["input_ids"]
+        #ys = batch["label"]
         lengths = torch.tensor([len(x) for x in xs])
 
         # pad to l_max
@@ -236,7 +238,7 @@ class ListOps(SequenceDataset):
     def init_defaults(self):
         return {
             "l_max": 2048,
-            "fixed_size": False,
+            "fixed_size": True,
             "append_bos": False,
             "append_eos": True,
             # 'max_vocab': 20, # Actual size 18
@@ -287,6 +289,8 @@ class ListOps(SequenceDataset):
 
         def collate_batch(batch):
             xs, ys = zip(*[(data["input_ids"], data["Target"]) for data in batch])
+            #xs = batch["input_ids"]
+            #ys = batch["Target"]
             lengths = torch.tensor([len(x) for x in xs])
             xs = nn.utils.rnn.pad_sequence(
                 xs, padding_value=self.vocab["<pad>"], batch_first=True
@@ -294,6 +298,7 @@ class ListOps(SequenceDataset):
             if self.fixed_size:
                 xs = nn.ConstantPad1d((0, self.l_max - xs.shape[1]), self.vocab["<pad>"])(xs)
             ys = torch.tensor(ys)
+            ys = torch.nn.functional.one_hot(ys, num_classes=self.d_output)
             return xs, ys, {"lengths": lengths}
 
         self._collate_fn = collate_batch
@@ -397,7 +402,7 @@ class PathFinderDataset(torch.utils.data.Dataset):
         self.transform = transform
         samples = []
         # for diff_level in ['curv_baseline', 'curv_contour_length_9', 'curv_contour_length_14']:
-        for diff_level in ["curv_contour_length_14"]:  # curv_contour_length_14
+        for diff_level in ["curv_baseline"]:  # curv_contour_length_14
             path_list = sorted(
                 list((self.data_dir / diff_level / "metadata").glob("*.npy")),
                 key=lambda path: int(path.stem),
@@ -594,6 +599,9 @@ class AAN(SequenceDataset):
                     for data in batch
                 ]
             )
+            #xs1 = batch["input_ids1"]
+            #xs2 = batch["input_ids2"]
+            #ys = batch["label"]
             lengths1 = torch.tensor([len(x) for x in xs1])
             lengths2 = torch.tensor([len(x) for x in xs2])
             xs1 = nn.utils.rnn.pad_sequence(
@@ -610,6 +618,7 @@ class AAN(SequenceDataset):
             xs1 = F.pad(xs1, (0, L-xs1.size(1)), value=self.vocab["<pad>"])
             xs2 = F.pad(xs2, (0, L-xs2.size(1)), value=self.vocab["<pad>"])
             ys = torch.tensor(ys)
+            ys = torch.nn.functional.one_hot(ys, num_classes=self.d_output)
 
             # Concatenate two batches
             xs = torch.cat([xs1, xs2], dim=0)

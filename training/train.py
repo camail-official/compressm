@@ -196,6 +196,7 @@ def train_model(
 
             # compute the training metric
             if (step + 1) % print_steps == 0:
+                print("computing training metric")
                 # Compute training metric
                 predictions = []
                 labels = []
@@ -235,6 +236,7 @@ def train_model(
                     break
 
                 # Compute validation metric
+                print("computing validation metric")
                 predictions = []
                 labels = []
                 for data in dataloaders["val"].loop_epoch(batch_size):
@@ -242,6 +244,8 @@ def train_model(
                     inference_model = eqx.tree_inference(model, value=True)
                     if dataset_name in LRA_REGISTRY:
                         X, y, _ = data
+                        X = jnp.array(X)
+                        y = jnp.array(y)
                     else:
                         X, y = data
                     prediction, _ = calc_output(
@@ -269,6 +273,7 @@ def train_model(
                 total_time = end - start
 
                 ### Dimensionality reduction ###
+                print("computing hankel singular values")
                 dico = model.get_all_hankel_singular_values()
                 hankel_singular_values[step] = dico
 
@@ -309,6 +314,7 @@ def train_model(
                             ranks.append(current_rank)  # No reduction
 
                     if reduction:
+                        print("doing reduction")
                         # Apply reduction
                         model = model.reduce_model_balanced_truncation(
                             ranks, dico, method="sqrtm"
@@ -346,6 +352,7 @@ def train_model(
                     operator_improv(val_metric, best_val(val_metric_for_best_model))
                     or reduction
                 ):
+                    print("computing test metric")
                     val_metric_for_best_model.append(val_metric)
                     predictions = []
                     labels = []
@@ -399,20 +406,18 @@ def train_model(
                 )
 
                 # log metrics to wandb
-                if (step + 1) % log_steps == 0:
-                    wandb.log(
-                        {
-                            "loss": running_loss,
-                            "train/metric": train_metric,
-                            "val/metric": val_metric,
-                            "test/metric": test_metric,
-                            "avg_dim": (
-                                int(sum(ranks) / len(ranks))
-                                if "ranks" in locals()
-                                else ssm_dimensions[0]
-                            ),
-                        }
-                    )
+                wandb.log(
+                    {
+                        "train/metric": train_metric,
+                        "val/metric": val_metric,
+                        "test/metric": test_metric,
+                        "avg_dim": (
+                            int(sum(ranks) / len(ranks))
+                            if "ranks" in locals()
+                            else ssm_dimensions[0]
+                        ),
+                    }
+                )
 
                 # Performance metrics
                 all_train_metric.append(train_metric)
@@ -443,6 +448,14 @@ def train_model(
                     np.array(list(ssm_dimensions.items()), dtype=object),
                 )
                 running_loss = 0.0
+
+            # log metrics to wandb
+            if (step + 1) % log_steps == 0:
+                wandb.log(
+                    {
+                        "train/loss": running_loss,
+                    }
+                )
 
             pbar.update(1)
 
@@ -492,7 +505,8 @@ def create_dataset_model_and_train(
     else:
         model_name_directory = model_name
     output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name
-    output_dir = f"T_{T:.2f}_time_{include_time}_lr_{lr}"
+    #output_dir = f"T_{T:.2f}_time_{include_time}_lr_{lr}"
+    output_dir = f"lr_{lr}"
     if model_name == "log_ncde" or model_name == "nrde":
         output_dir += f"_stepsize_{stepsize:.2f}_depth_{logsig_depth}"
     for k, v in model_args.items():

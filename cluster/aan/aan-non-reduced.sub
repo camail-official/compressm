@@ -1,6 +1,6 @@
 executable = /home/pnazari/cluster/htcondor/empty_wrapper.sh
 initialdir = /home/pnazari/workspace/compressm
-arguments = /home/pnazari/.local/bin/uv run --no-sync -m run_experiment --dataset_name pathfinder/non-reduced/pathfinder-$(seed)-$(dim)
+arguments = /home/pnazari/.local/bin/uv run --no-sync -m run_experiment --dataset_name aan/non-reduced/aan-$(seed)-$(dim)
 error = outputs/$(Cluster)_$(Process).err
 output = outputs/$(Cluster)_$(Process).out
 log = outputs/$(Cluster)_$(Process).log

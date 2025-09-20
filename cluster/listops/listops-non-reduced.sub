@@ -12,11 +12,11 @@ MaxTime = 288000
 periodic_remove = (JobStatus =?= 2) && ((CurrentTime - JobCurrentStartDate) >= $(MaxTime))
 
 queue dim, seed from (
-32 8
-32 42
-32 123
-32 456
-32 789
+64 8
+64 42
+64 123
+64 456
+64 789
 96 8
 96 42
 96 123

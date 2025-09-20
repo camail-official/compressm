@@ -1,0 +1,36 @@
+{
+  "data_dir": "/home/pnazari/workspace/linoss_rewrite/data/lra_release/pathfinder/pathfinder32",
+  "output_parent_dir": "",
+  "lr_scheduler": "lambda lr: lr",
+  "num_steps": 500000,
+  "print_steps": 10000,
+  "log_steps": 100,
+  "batch_size": 64,
+  "model_name": "lru",
+  "metric": "accuracy",
+  "classification": true,
+  "dataset_name": "pathfinder",
+  "use_presplit": true,
+  "T": 1,
+  "dt0": null,
+  "scale": 1,
+  "time": "True",
+  "lr": "0.001",
+  "num_blocks": "6",
+  "hidden_dim": "192",
+  "ssm_dim": "64",
+  "weight_decay": 0.05,
+  "use_warmup_cosine": true,
+  "ssm_lr_factor": 0.25,
+  "red_steps": 50000,
+  "use_embedding": false,
+  "drop_rate": 0.0,
+  "wandb": {
+    "project": "compressm-LRU",
+    "entity": "camail"
+  },
+  "seeds": [
+    8
+  ],
+  "tol": -1
+}

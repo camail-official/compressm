@@ -540,7 +540,7 @@ class AAN(SequenceDataset):
     def init_defaults(self):
         return {
             "l_max": 4096,
-            "fixed_size": False,
+            "fixed_size": True,
             # 'max_vocab': 100, # Full size 98
             "append_bos": False,
             "append_eos": True,

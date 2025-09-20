@@ -537,7 +537,7 @@ def create_listops_dataset(data_dir, batch_size):
     }
 
     return_dict = {
-        "name": "imdb",
+        "name": "listops",
         "raw_dataloaders": raw_dataloaders,
         "coeff_dataloaders": None,
         "path_dataloaders": None,
@@ -561,12 +561,12 @@ def create_pathfinder_dataset(data_dir, batch_size):
     # TODO: allow for setting the batch size in the config later on
     raw_dataloaders = {
         "train": dataset.train_dataloader(batch_size=batch_size, shuffle=True),
-        "val": dataset.val_dataloader(batch_size=batch_size, shuffle=False),
-        "test": dataset.test_dataloader(batch_size=batch_size, shuffle=False),
+        "val": dataset.val_dataloader(batch_size=batch_size, shuffle=False)[None],
+        "test": dataset.test_dataloader(batch_size=batch_size, shuffle=False)[None],
     }
 
     return_dict = {
-        "name": "imdb",
+        "name": "pathfinder",
         "raw_dataloaders": raw_dataloaders,
         "coeff_dataloaders": None,
         "path_dataloaders": None,
@@ -590,12 +590,12 @@ def create_pathfinderx_dataset(data_dir, batch_size):
     # TODO: allow for setting the batch size in the config later on
     raw_dataloaders = {
         "train": dataset.train_dataloader(batch_size=batch_size, shuffle=True),
-        "val": dataset.val_dataloader(batch_size=batch_size, shuffle=False),
-        "test": dataset.test_dataloader(batch_size=batch_size, shuffle=False),
+        "val": dataset.val_dataloader(batch_size=batch_size, shuffle=False)[None],
+        "test": dataset.test_dataloader(batch_size=batch_size, shuffle=False)[None],
     }
 
     return_dict = {
-        "name": "imdb",
+        "name": "pathfinderx",
         "raw_dataloaders": raw_dataloaders,
         "coeff_dataloaders": None,
         "path_dataloaders": None,
@@ -662,7 +662,6 @@ def create_dataset(
         )
     elif name == "pathfinder":
         return create_pathfinder_dataset(data_dir, batch_size)
-        pass
     elif name == "pathfinderx":
         return create_pathfinderx_dataset(data_dir, batch_size)
     elif name == "imdb":

@@ -551,7 +551,6 @@ def create_dataset_model_and_train(
 
     print(f"Creating model {model_name}")
     classification = metric == "accuracy"
-    print(dataset)
     model, state = create_model(
         model_name,
         dataset.data_dim,

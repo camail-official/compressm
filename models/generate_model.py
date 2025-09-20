@@ -72,9 +72,10 @@ def create_model(
     max_steps=16**4,
     scale=1.0,
     lambd=0.0,
-    linoss_discretization='IM',
+    linoss_discretization="IM",
     use_embedding=False,
     vocab_size=None,
+    dual=False,
     *,
     key,
 ):
@@ -151,6 +152,8 @@ def create_model(
     elif model_name == "lru":
         if num_blocks is None:
             raise ValueError("Must specify num_blocks for LRU.")
+
+        # Create the LRU model (handles dual_head creation internally)
         lru = LRU(
             num_blocks,
             data_dim,
@@ -161,9 +164,11 @@ def create_model(
             output_step,
             use_embedding,
             vocab_size=vocab_size,
+            dual=dual,  # LRU will create dual_head if True
             drop_rate=drop_rate,
             key=key,
         )
+
         state = eqx.nn.State(lru)
         return lru, state
     elif model_name == "S5":

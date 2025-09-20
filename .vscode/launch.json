@@ -10,6 +10,7 @@
             "request": "launch",
             "module": "run_experiment",
             "args": [
+                "--no-sync",
                 "--dataset_name", "aan"
             ],
             "env": {

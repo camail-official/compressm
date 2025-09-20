@@ -25,7 +25,10 @@ class PyTorchDataloaderWrapper(DataLoader):
             while True:
                 yield whole_batch
         else:
+            # For smaller batch sizes, continuously iterate through shuffled epochs
             while True:
+                # Each call to super().__iter__() creates a new iterator with fresh shuffling
+                # (if shuffle=True was passed during initialization)
                 for batch in super().__iter__():
                     yield batch
 

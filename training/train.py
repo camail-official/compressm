@@ -90,6 +90,7 @@ def train_model(
     model_name="lru",
     tol=None,
     red_steps=1e10,
+    dual=False,
 ):
 
     if metric == "accuracy":
@@ -191,6 +192,7 @@ def train_model(
                 opt_state,
                 stepkey,
                 use_multi_optimizer=(ssm_lr_factor != 1.0),
+                dual=dual,
             )
             running_loss += value
 
@@ -216,6 +218,7 @@ def train_model(
                         stepkey,
                         model.stateful,
                         model.nondeterministic,
+                        dual,
                     )
                     predictions.append(prediction)
                     labels.append(y)
@@ -255,6 +258,7 @@ def train_model(
                         stepkey,
                         model.stateful,
                         model.nondeterministic,
+                        dual,
                     )
                     predictions.append(prediction)
                     labels.append(y)
@@ -372,6 +376,7 @@ def train_model(
                             stepkey,
                             model.stateful,
                             model.nondeterministic,
+                            dual,
                         )
                         predictions.append(prediction)
                         labels.append(y)
@@ -551,6 +556,10 @@ def create_dataset_model_and_train(
 
     print(f"Creating model {model_name}")
     classification = metric == "accuracy"
+    
+    # Extract dual parameter from model_args for use in training
+    dual = model_args["dual"]
+    
     model, state = create_model(
         model_name,
         dataset.data_dim,
@@ -603,4 +612,5 @@ def create_dataset_model_and_train(
         tol=tol,
         red_steps=red_steps,
         model_name=model_name,
+        dual=dual,
     )

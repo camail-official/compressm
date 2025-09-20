@@ -201,7 +201,24 @@ def truncate_optimizer_state(old_state, new_state):
 
 
 @eqx.filter_jit
-def calc_output(model, X, state, key, stateful, nondeterministic):
+def calc_output(model, X, state, key, stateful, nondeterministic, dual=False):
+    """
+    Compute model output with optional dual sequence handling.
+    
+    Args:
+        model: The model to evaluate
+        X: Input data 
+        state: Model state (if stateful)
+        key: JAX random key
+        stateful: Whether model is stateful
+        nondeterministic: Whether model is nondeterministic  
+        dual: Whether to apply dual sequence processing
+        
+    Returns:
+        output: Model predictions
+        state: Updated model state
+    """
+    # Regular model processing (model handles dual internally)
     if stateful:
         if nondeterministic:
             output, state = jax.vmap(
@@ -216,15 +233,20 @@ def calc_output(model, X, state, key, stateful, nondeterministic):
     else:
         output = jax.vmap(model)(X)
 
+    # Apply dual processing if needed (model outputs features when dual_head present)
+    if dual and hasattr(model, 'dual_head') and model.dual_head is not None:
+        from models.dual_processing import process_dual_outputs
+        output = process_dual_outputs(output, model.dual_head)
+
     return output, state
 
 
 @eqx.filter_jit
 @eqx.filter_value_and_grad(has_aux=True)
-def classification_loss(diff_model, static_model, X, y, state, key):
+def classification_loss(diff_model, static_model, X, y, state, key, dual=False):
     model = eqx.combine(diff_model, static_model)
     pred_y, state = calc_output(
-        model, X, state, key, model.stateful, model.nondeterministic
+        model, X, state, key, model.stateful, model.nondeterministic, dual
     )
     norm = 0
     if model.lip2:
@@ -242,10 +264,10 @@ def classification_loss(diff_model, static_model, X, y, state, key):
 
 @eqx.filter_jit
 @eqx.filter_value_and_grad(has_aux=True)
-def regression_loss(diff_model, static_model, X, y, state, key):
+def regression_loss(diff_model, static_model, X, y, state, key, dual=False):
     model = eqx.combine(diff_model, static_model)
     pred_y, state = calc_output(
-        model, X, state, key, model.stateful, model.nondeterministic
+        model, X, state, key, model.stateful, model.nondeterministic, dual
     )
     pred_y = pred_y[:, :, 0]
     norm = 0
@@ -263,9 +285,9 @@ def regression_loss(diff_model, static_model, X, y, state, key):
 
 
 @eqx.filter_jit
-def make_step(model, filter_spec, X, y, loss_fn, state, opt, opt_state, key, use_multi_optimizer=False):
+def make_step(model, filter_spec, X, y, loss_fn, state, opt, opt_state, key, use_multi_optimizer=False, dual=False):
     diff_model, static_model = eqx.partition(model, filter_spec)
-    (value, state), grads = loss_fn(diff_model, static_model, X, y, state, key)
+    (value, state), grads = loss_fn(diff_model, static_model, X, y, state, key, dual)
     params = eqx.filter(model, eqx.is_inexact_array)
     
     if use_multi_optimizer:

@@ -32,6 +32,7 @@ from models.LTI_utils import (
     LTI_to_LRU,
     reduction_analysis
 )
+from models.layers import DualHead
 
 
 def binary_operator_diag(element_i, element_j):
@@ -226,7 +227,8 @@ class LRUBlock(eqx.Module):
 class LRU(eqx.Module):
     linear_encoder: eqx.nn.Linear
     blocks: List[LRUBlock]
-    linear_layer: eqx.nn.Linear
+    linear_layer: eqx.nn.Linear | None
+    dual_head: DualHead | None
     classification: bool
     output_step: int
     stateful: bool = True
@@ -244,6 +246,7 @@ class LRU(eqx.Module):
         output_step,
         use_embedding,
         vocab_size=None,
+        dual=False,  # Whether to create DualHead for dual sequence processing
         # TODO: make the radii input parameters
         r_min=0.9,
         r_max=0.999,
@@ -252,7 +255,7 @@ class LRU(eqx.Module):
         *,
         key
     ):
-        linear_encoder_key, *block_keys, linear_layer_key = jr.split(
+        linear_encoder_key, *block_keys, output_layer_key = jr.split(
             key, num_blocks + 2
         )
         if use_embedding:
@@ -263,7 +266,15 @@ class LRU(eqx.Module):
             LRUBlock(N, H, r_min, r_max, max_phase, drop_rate, key=key)
             for key in block_keys
         ]
-        self.linear_layer = eqx.nn.Linear(H, output_dim, key=linear_layer_key)
+        # Create either linear_layer or dual_head, but not both (using same key)
+        if dual:
+            # Create dual_head if needed. Note that it is only applied outside of the LRU vmap because it is not batch agnostic
+            self.dual_head = DualHead(2 * H, H, output_dim, key=output_layer_key)
+            self.linear_layer = None  # Not needed when using dual_head
+        else:
+            self.linear_layer = eqx.nn.Linear(H, output_dim, key=output_layer_key)
+            self.dual_head = None
+            
         self.classification = classification
         self.output_step = output_step
 
@@ -272,13 +283,24 @@ class LRU(eqx.Module):
         x = jax.vmap(self.linear_encoder)(x)
         for block, key in zip(self.blocks, dropkeys):
             x, state = block(x, state, key=key)
-        if self.classification:
-            x = jnp.mean(x, axis=0)
-            x = jax.nn.softmax(self.linear_layer(x), axis=0)
+        
+        # If dual_head is present, return features instead of final classification
+        if self.dual_head is not None:
+            if self.classification:
+                features = jnp.mean(x, axis=0)  # (H,) - return pooled features
+            else:
+                raise NotImplementedError("Dual processing is not supported for regression tasks.")
+            return features, state
         else:
-            x = x[self.output_step - 1 :: self.output_step]
-            x = jax.nn.tanh(jax.vmap(self.linear_layer)(x))
-        return x, state
+            # Regular processing (linear_layer must exist if dual_head is None)
+            assert self.linear_layer is not None, "linear_layer must exist when dual_head is None"
+            if self.classification:
+                x = jnp.mean(x, axis=0)
+                x = jax.nn.softmax(self.linear_layer(x), axis=0)
+            else:
+                x = x[self.output_step - 1 :: self.output_step]
+                x = jax.nn.tanh(jax.vmap(self.linear_layer)(x))
+            return x, state
     
     def get_all_hankel_singular_values(self):
         """Get Hankel singular values (P, Q, g) for all blocks."""

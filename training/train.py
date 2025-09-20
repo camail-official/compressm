@@ -509,7 +509,7 @@ def create_dataset_model_and_train(
         model_name_directory = model_name + "_" + linoss_discretization
     else:
         model_name_directory = model_name
-    output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name
+    output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name + "_new"
     # output_dir = f"T_{T:.2f}_time_{include_time}_lr_{lr}"
     output_dir = f"lr_{lr}"
     if model_name == "log_ncde" or model_name == "nrde":

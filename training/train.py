@@ -194,6 +194,14 @@ def train_model(
             )
             running_loss += value
 
+            # log loss to wandb
+            if (step + 1) % log_steps == 0:
+                wandb.log(
+                    {
+                        "train/loss": value,
+                    }
+                )
+
             # compute the training metric
             if (step + 1) % print_steps == 0:
                 print("computing training metric")
@@ -340,11 +348,11 @@ def train_model(
                         opt_state = truncate_optimizer_state(opt_state, new_opt_state)
 
                 start = time.time()
-                if operator_no_improv(val_metric, best_val(val_metric_for_best_model)):
-                    no_val_improvement += 1
-                    if no_val_improvement > 10:
-                        has_stagnated = True
-                        break
+                # if operator_no_improv(val_metric, best_val(val_metric_for_best_model)):
+                #    no_val_improvement += 1
+                #    if no_val_improvement > 10:
+                #        has_stagnated = True
+                #        break
 
                 # overwrite the test metric if the validation improves or if the model has been reduced
                 # this ensures the best model is restrained to the latest reduced model size
@@ -449,14 +457,6 @@ def train_model(
                 )
                 running_loss = 0.0
 
-            # log metrics to wandb
-            if (step + 1) % log_steps == 0:
-                wandb.log(
-                    {
-                        "train/loss": running_loss,
-                    }
-                )
-
             pbar.update(1)
 
     if has_crashed:
@@ -505,7 +505,7 @@ def create_dataset_model_and_train(
     else:
         model_name_directory = model_name
     output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name
-    #output_dir = f"T_{T:.2f}_time_{include_time}_lr_{lr}"
+    # output_dir = f"T_{T:.2f}_time_{include_time}_lr_{lr}"
     output_dir = f"lr_{lr}"
     if model_name == "log_ncde" or model_name == "nrde":
         output_dir += f"_stepsize_{stepsize:.2f}_depth_{logsig_depth}"

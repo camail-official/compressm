@@ -14,6 +14,7 @@ import torchvision
 from einops.layers.torch import Rearrange, Reduce
 from PIL import Image  # Only used for Pathfinder
 from datasets import DatasetDict, Value, load_dataset
+import numpy as np
 
 from data_dir.lra.base import default_data_path, SequenceDataset, ImageResolutionSequenceDataset
 
@@ -385,21 +386,59 @@ class ListOps(SequenceDataset):
         return dataset, tokenizer, vocab
 
 class PathFinderDataset(torch.utils.data.Dataset):
-    """Path Finder dataset."""
+    """Path Finder dataset with preprocessed file support."""
 
     # There's an empty file in the dataset
     blacklist = {"pathfinder32/curv_baseline/imgs/0/sample_172.png"}
 
-    def __init__(self, data_dir, transform=None):
+    def __init__(self, data_dir, transform=None, resolution=32):
         """
         Args:
             data_dir (string): Directory with all the images.
             transform (callable, optional): Optional transform to be applied
                 on a sample.
+            resolution (int): Image resolution (32, 64, 128, or 256).
         """
         self.data_dir = Path(data_dir).expanduser()
         assert self.data_dir.is_dir(), f"data_dir {str(self.data_dir)} does not exist"
         self.transform = transform
+        self.resolution = resolution
+        
+        # Try to load from preprocessed .npz file first
+        self.use_preprocessed = False
+        self.preprocessed_data = None
+        self.images_data = None
+        self.labels_data = None
+        
+        preprocessed_file = self.data_dir / f"pathfinder{resolution}_preprocessed.npz"
+        
+        if preprocessed_file.exists():
+            try:
+                self._load_preprocessed(preprocessed_file)
+                logging.info(f"Using preprocessed dataset: {preprocessed_file}")
+            except Exception as e:
+                logging.warning(f"Failed to load preprocessed file {preprocessed_file}: {e}")
+                logging.info("Falling back to individual image loading")
+                self._load_individual_images()
+        else:
+            logging.info(f"Preprocessed file {preprocessed_file} not found, using individual image loading")
+            self._load_individual_images()
+
+    def _load_preprocessed(self, npz_path):
+        """Load dataset from preprocessed .npz file."""
+        self.preprocessed_data = np.load(npz_path, allow_pickle=True)
+        self.images_data = self.preprocessed_data['images']
+        self.labels_data = self.preprocessed_data['labels']
+        self.num_samples = int(self.preprocessed_data['num_samples'])
+        self.use_preprocessed = True
+        
+        # Verify resolution matches
+        file_resolution = int(self.preprocessed_data.get('resolution', 32))
+        if file_resolution != self.resolution:
+            raise ValueError(f"Preprocessed file resolution {file_resolution} does not match requested {self.resolution}")
+
+    def _load_individual_images(self):
+        """Load dataset using individual image files (fallback method)."""
         samples = []
         # for diff_level in ['curv_baseline', 'curv_contour_length_9', 'curv_contour_length_14']:
         for diff_level in ["curv_baseline"]:  # curv_contour_length_14
@@ -421,17 +460,45 @@ class PathFinderDataset(torch.utils.data.Dataset):
                             label = int(metadata[3])
                             samples.append((image_path, label))
         self.samples = samples
+        self.num_samples = len(samples)
 
     def __len__(self):
-        return len(self.samples)
+        return self.num_samples
 
     def __getitem__(self, idx):
+        if self.use_preprocessed:
+            return self._get_preprocessed_item(idx)
+        else:
+            return self._get_individual_item(idx)
+
+    def _get_preprocessed_item(self, idx):
+        """Get item from preprocessed .npz file (fast path)."""
+        # Load image as numpy array
+        image_array = self.images_data[idx]
+        target = int(self.labels_data[idx])
+        
+        # Convert to PIL Image for compatibility with transforms
+        sample = Image.fromarray(image_array, mode='L')
+        
+        # Apply transforms
+        if self.transform is not None:
+            sample = self.transform(sample)
+        
+        return sample, target
+
+    def _get_individual_item(self, idx):
+        """Get item from individual image files (fallback path)."""
         path, target = self.samples[idx]
+        
+        # Load image from disk
         # https://github.com/pytorch/vision/blob/9b29f3f22783112406d9c1a6db47165a297c3942/torchvision/datasets/folder.py#L247
         with open(self.data_dir / path, "rb") as f:
             sample = Image.open(f).convert("L")  # Open in grayscale
+        
+        # Apply transforms
         if self.transform is not None:
             sample = self.transform(sample)
+        
         return sample, target
 
 class PathFinder(ImageResolutionSequenceDataset):
@@ -512,7 +579,7 @@ class PathFinder(ImageResolutionSequenceDataset):
         # [2021-08-18] TD: I ran into RuntimeError: Too many open files.
         # https://github.com/pytorch/pytorch/issues/11201
         # torch.multiprocessing.set_sharing_strategy("file_system")
-        dataset = PathFinderDataset(self.data_dir, transform=self.default_transforms())
+        dataset = PathFinderDataset(self.data_dir, transform=self.default_transforms(), resolution=self.resolution)
         len_dataset = len(dataset)
         val_len = int(self.val_split * len_dataset)
         test_len = int(self.test_split * len_dataset)

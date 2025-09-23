@@ -1,6 +1,6 @@
 {
   "seeds": [
-    123
+    42
   ],
   "data_dir": "/home/pnazari/workspace/compressm/data",
   "output_parent_dir": "",
@@ -21,7 +21,7 @@
   "lr": "0.001",
   "num_blocks": "1",
   "hidden_dim": "256",
-  "ssm_dim": "32",
+  "ssm_dim": "165",
   "weight_decay": 0.05,
   "use_warmup_cosine": true,
   "ssm_lr_factor": 0.1,

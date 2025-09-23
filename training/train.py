@@ -90,6 +90,7 @@ def train_model(
     model_name="lru",
     tol=None,
     red_steps=1e10,
+    red_wait_steps=0,
     dual=False,
 ):
 
@@ -118,7 +119,7 @@ def train_model(
 
     batchkey, key = jr.split(key, 2)
 
-    opt = create_optimizer(
+    opt, main_schedule, ssm_schedule = create_optimizer(
         model_name,
         lr,
         ssm_lr_factor,
@@ -201,7 +202,10 @@ def train_model(
                 wandb.log(
                     {
                         "train/loss": value,
-                    }
+                        # "lr/main": main_schedule(opt_state[0]["main"].hyperparams["learning_rate"]),
+                        # "lr/ssm": ssm_schedule(opt_state[0]["ssm"].count.item()),
+                    },
+                    step=step + 1
                 )
 
             # compute the training metric
@@ -241,10 +245,6 @@ def train_model(
                     train_metric = jnp.mean(
                         jnp.mean((prediction - y) ** 2, axis=1), axis=0
                     )
-                # if the training metric is less than 0.15 kill training run
-                if train_metric < 0.15:
-                    has_crashed = True
-                    break
 
                 # Compute validation metric
                 print("computing validation metric")
@@ -276,11 +276,13 @@ def train_model(
                     val_metric = jnp.mean(
                         jnp.argmax(prediction, axis=1) == jnp.argmax(y, axis=1)
                     )
+                    val_loss = jnp.mean(-jnp.sum(y * jnp.log(prediction + 1e-8), axis=1))
                 else:
                     prediction = prediction[:, :, 0]
                     val_metric = jnp.mean(
                         jnp.mean((prediction - y) ** 2, axis=1), axis=0
                     )
+                    val_loss = jnp.mean(jnp.mean((prediction - y) ** 2, axis=1))
                 end = time.time()
                 total_time = end - start
 
@@ -291,7 +293,7 @@ def train_model(
 
                 reduction = False
 
-                if tol is not None and step < red_steps + 1:
+                if tol is not None and step > red_wait_steps - 1 and step < red_steps + 1:
                     # Get reduction analysis for all blocks
                     reduction_analysis = model.get_reduction_analysis(
                         dico, hankel_tol=tol
@@ -333,7 +335,7 @@ def train_model(
                         )
                         model_params = eqx.filter(model, eqx.is_inexact_array)
                         # Reinitialize optimizer
-                        opt = create_optimizer(
+                        opt, main_schedule, ssm_schedule = create_optimizer(
                             model_name,
                             lr,
                             ssm_lr_factor,
@@ -352,7 +354,7 @@ def train_model(
                         opt_state = truncate_optimizer_state(opt_state, new_opt_state)
 
                 start = time.time()
-                # if operator_no_improv(val_metric, best_val(val_metric_for_best_model)):
+                #if operator_no_improv(val_metric, best_val(val_metric_for_best_model)):
                 #    no_val_improvement += 1
                 #    if no_val_improvement > 10:
                 #        has_stagnated = True
@@ -423,13 +425,15 @@ def train_model(
                     {
                         "train/metric": train_metric,
                         "val/metric": val_metric,
+                        "val/loss": val_loss,
                         "test/metric": test_metric,
                         "avg_dim": (
                             int(sum(ranks) / len(ranks))
                             if "ranks" in locals()
                             else ssm_dimensions[0]
                         ),
-                    }
+                    },
+                    step=step + 1
                 )
 
                 # Performance metrics
@@ -503,13 +507,16 @@ def create_dataset_model_and_train(
     ssm_lr_factor=1.0,
     tol=None,
     red_steps=0,
+    red_wait_steps=0,
     log_steps=100,
 ):
     if model_name == "LinOSS":
         model_name_directory = model_name + "_" + linoss_discretization
     else:
         model_name_directory = model_name
-    output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name + "_new"
+    output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name + "_new_7"
+
+    # remove this because the filename gets too long otherwise
     # output_dir = f"T_{T:.2f}_time_{include_time}_lr_{lr}"
     output_dir = f"lr_{lr}"
     if model_name == "log_ncde" or model_name == "nrde":
@@ -518,6 +525,11 @@ def create_dataset_model_and_train(
         name = str(v)
         if "(" in name:
             name = name.split("(", 1)[0]
+
+        # do this because the filename get too long otherwise
+        if k in ["dt0", "solver", "stepsize_controller"]:
+            continue
+
         if name == "dt0":
             output_dir += f"_{k}_" + f"{v:.2f}"
         else:
@@ -529,6 +541,8 @@ def create_dataset_model_and_train(
         output_dir += f"_tol_{tol:.3e}"
     if red_steps > 0:
         output_dir += f"_warmup_{red_steps}"
+    if red_wait_steps > 0:
+        output_dir += f"_wait_{red_wait_steps}"
 
     key = jr.PRNGKey(seed)
 
@@ -611,6 +625,7 @@ def create_dataset_model_and_train(
         ssm_lr_factor=ssm_lr_factor,
         tol=tol,
         red_steps=red_steps,
+        red_wait_steps=red_wait_steps,
         model_name=model_name,
         dual=dual,
     )

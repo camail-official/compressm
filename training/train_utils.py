@@ -129,7 +129,7 @@ def create_multi_optimizer_with_equinox(model_name, base_lr, ssm_lr_factor, weig
     # Create multi-transform optimizer
     optimizer = optax.multi_transform(optimizers, label_fn)
     
-    return optimizer
+    return optimizer, main_schedule, ssm_schedule
 
 def create_optimizer(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine, lr_scheduler, verbose=False):
     """
@@ -151,7 +151,7 @@ def create_optimizer(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use
     # Create optimizer with differential learning rates for SSM parameters
     if ssm_lr_factor != 1.0:
         # Use multi-optimizer approach for differential learning rates
-        opt = create_multi_optimizer_with_equinox(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine)
+        opt, main_schedule, ssm_schedule = create_multi_optimizer_with_equinox(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use_warmup_cosine)
         if verbose:
             print(f"Using multi-optimizer: main_lr={lr}, ssm_lr={lr * ssm_lr_factor}, weight_decay={weight_decay}")
             print(f"SSM parameters will use lr_factor={ssm_lr_factor} (no weight decay)")
@@ -173,8 +173,11 @@ def create_optimizer(model_name, lr, ssm_lr_factor, weight_decay, num_steps, use
                 if verbose:
                     print(f"Using Adam and base_lr={lr}")
                 opt = optax.adam(learning_rate=schedule)
+
+        main_schedule = schedule
+        ssm_schedule = schedule  # Same schedule for SSM in single-optimizer case
     
-    return opt
+    return opt, main_schedule, ssm_schedule
 
 def truncate_optimizer_state(old_state, new_state):
     def truncate(old, new):

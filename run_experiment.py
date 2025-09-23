@@ -102,6 +102,7 @@ def run_experiments(model_names, dataset_names, experiment_folder):
             if tol <= 0.0:
                 tol = None
             red_steps = data.get("red_steps", 0)
+            red_wait_steps = data.get("red_wait_steps", 0)
             model_args = {
                 "num_blocks": num_blocks,
                 "hidden_dim": hidden_dim,
@@ -144,7 +145,8 @@ def run_experiments(model_names, dataset_names, experiment_folder):
                 "use_warmup_cosine": use_warmup_cosine,
                 "ssm_lr_factor": ssm_lr_factor,
                 "tol": tol,
-                "red_steps": red_steps
+                "red_steps": red_steps,
+                "red_wait_steps": red_wait_steps
             }
             run_fn = create_dataset_model_and_train
 

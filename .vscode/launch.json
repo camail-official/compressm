@@ -10,8 +10,7 @@
             "request": "launch",
             "module": "run_experiment",
             "args": [
-                "--no-sync",
-                "--dataset_name", "aan"
+                "--dataset_name", "imdb/reduced/imdb-192-8-1e-1"
             ],
             "env": {
                 "HOME": "/home/pnazari"

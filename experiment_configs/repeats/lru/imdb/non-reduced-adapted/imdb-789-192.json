@@ -1,9 +1,5 @@
 {
   "seeds": [
-    8,
-    42,
-    123,
-    456,
     789
   ],
   "data_dir": "/home/pnazari/workspace/compressm/data",

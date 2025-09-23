@@ -1,7 +1,7 @@
 import json
 
 
-model = "pathfinder"
+model = "imdb"
 
 # Read the base configuration from listops.json
 with open(f'experiment_configs/repeats/lru/{model}.json', 'r') as f:
@@ -9,7 +9,7 @@ with open(f'experiment_configs/repeats/lru/{model}.json', 'r') as f:
 
 # Seeds and new SSM dimensions
 seeds = [8, 42, 123, 456, 789]
-new_ssm_dims = [129, 105, 81, 65, 51, 32]
+new_ssm_dims = [192, 165, 150, 136, 119, 95]
 
 print('Creating new listops configuration files with custom SSM dimensions...')
 
@@ -21,7 +21,7 @@ for seed in seeds:
         config['ssm_dim'] = str(ssm_dim)
         config['tol'] = -1  # non-reduced case
         
-        filename = f'experiment_configs/repeats/lru/{model}/non-reduced-new/{model}-{seed}-{ssm_dim}.json'
+        filename = f'experiment_configs/repeats/lru/{model}/non-reduced-adapted/{model}-{seed}-{ssm_dim}.json'
         with open(filename, 'w') as f:
             json.dump(config, f, indent=2)
         

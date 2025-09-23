@@ -3,9 +3,9 @@
 import os
 
 # Configuration
-model = "aan"  # Change this to match your model
+model = "imdb"  # Change this to match your model
 seeds = [8, 42, 123, 456, 789]
-new_ssm_dims = [203, 170, 136, 111, 84, 53]  # Change this to match your SSM dimensions
+new_ssm_dims = [192, 165, 150, 136, 119, 95]  # Change this to match your SSM dimensions
 
 # Create cluster directory if it doesn't exist
 cluster_dir = f"cluster/{model}"
@@ -16,7 +16,7 @@ print(f'Creating HTCondor submission files for {model}...')
 # Create the non-reduced-new submission file
 sub_content = f"""executable = /home/pnazari/cluster/htcondor/empty_wrapper.sh
 initialdir = /home/pnazari/workspace/compressm
-arguments = /home/pnazari/.local/bin/uv run --no-sync -m run_experiment --dataset_name {model}/non-reduced-new/{model}-$(seed)-$(dim)
+arguments = /home/pnazari/.local/bin/uv run --no-sync -m run_experiment --dataset_name {model}/non-reduced-adapted/{model}-$(seed)-$(dim)
 error = outputs/$(Cluster)_$(Process).err
 output = outputs/$(Cluster)_$(Process).out
 log = outputs/$(Cluster)_$(Process).log
@@ -38,7 +38,7 @@ for ssm_dim in new_ssm_dims:
 sub_content += ")"
 
 # Write the submission file
-sub_filename = f"{cluster_dir}/{model}-non-reduced-new.sub"
+sub_filename = f"{cluster_dir}/{model}-non-reduced-adapted.sub"
 with open(sub_filename, 'w') as f:
     f.write(sub_content)
 

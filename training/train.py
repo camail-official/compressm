@@ -214,6 +214,7 @@ def train_model(
                 # Compute training metric
                 predictions = []
                 labels = []
+                training_start = time.time()
                 for data in dataloaders["train"].loop_epoch(batch_size):
                     stepkey, key = jr.split(key, 2)
                     inference_model = eqx.tree_inference(model, value=True)
@@ -234,6 +235,8 @@ def train_model(
                     )
                     predictions.append(prediction)
                     labels.append(y)
+                training_time = time.time() - training_start
+                print(training_time)
                 prediction = jnp.vstack(predictions)
                 y = jnp.vstack(labels)
                 if model.classification:
@@ -370,7 +373,6 @@ def train_model(
                     val_metric_for_best_model.append(val_metric)
                     predictions = []
                     labels = []
-                    test_start = time.time()
                     for data in dataloaders["test"].loop_epoch(batch_size):
                         stepkey, key = jr.split(key, 2)
                         inference_model = eqx.tree_inference(model, value=True)
@@ -393,8 +395,6 @@ def train_model(
                         labels.append(y)
                     prediction = jnp.vstack(predictions)
                     y = jnp.vstack(labels)
-                    test_end = time.time()
-                    test_time = test_end - test_start
                     if model.classification:
                         test_metric = jnp.mean(
                             jnp.argmax(prediction, axis=1) == jnp.argmax(y, axis=1)
@@ -415,7 +415,6 @@ def train_model(
                         "Train": f"{train_metric:.2f}",
                         "Val": f"{val_metric:.2f}",
                         "Top test": f"{test_metric:.2f} at step: {best_step}",
-                        "Test time": f"{test_time}s",
                         "Avg dim": (
                             f"{int(sum(ranks)/len(ranks))}"
                             if "ranks" in locals()

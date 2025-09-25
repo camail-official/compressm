@@ -34,7 +34,7 @@
   "use_embedding": false,
   "drop_rate": 0.1,
   "wandb": {
-    "project": "compressm-LRU",
-    "entity": "camail"
+    "project": "",
+    "entity": ""
   }
 }

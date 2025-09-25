@@ -1,7 +1,5 @@
 # Compre-SSM
 
-This  repository contains the implementation for the in-training compression of SSMs by [Makram Chahine](https://www.mit.edu/~chahine/)
-
 
 This repository is an extension of [https://github.com/tk-rusch/linoss](https://github.com/tk-rusch/linoss) which is itself an extension of [https://github.com/Benjamin-Walker/log-neural-cdes](https://github.com/Benjamin-Walker/log-neural-cdes). 
 

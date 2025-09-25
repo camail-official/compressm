@@ -1,5 +1,5 @@
 #!/bin/bash
-# filepath: /home/emily/makram/compressm/experiment_runners/scifar_runner.sh
+# filepath: path/to/scifar_runner.sh
 
 # Define the path to the configuration file
 CONFIG_FILE="experiment_configs/repeats/lru/scifar.json"

@@ -15,7 +15,7 @@ print(f'Creating HTCondor submission files for {model}...')
 
 # Create the non-reduced-new submission file
 sub_content = f"""executable = /home/pnazari/cluster/htcondor/empty_wrapper.sh
-initialdir = /home/pnazari/workspace/compressm
+initialdir = /path/to/compressm
 arguments = /home/pnazari/.local/bin/uv run --no-sync -m run_experiment --dataset_name {model}/non-reduced-adapted/{model}-$(seed)-$(dim)
 error = outputs/$(Cluster)_$(Process).err
 output = outputs/$(Cluster)_$(Process).out

@@ -1,10 +1,6 @@
 {
   "seeds": [
-    8,
-    42,
-    123,
-    456,
-    789
+    8
   ],
   "data_dir": "/fast/pnazari/data/lra_release/cifar",
   "output_parent_dir": "",
@@ -29,7 +25,7 @@
   "weight_decay": 0.05,
   "use_warmup_cosine": true,
   "ssm_lr_factor": 0.25,
-  "tol": -1,
+  "tol": 0.03,
   "red_steps": 18000,
   "use_embedding": false,
   "drop_rate": 0.1,

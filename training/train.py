@@ -517,7 +517,7 @@ def create_dataset_model_and_train(
         model_name_directory = model_name + "_" + linoss_discretization
     else:
         model_name_directory = model_name
-    output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name + "_stuff"
+    output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name  # + "_stuff"
 
     # remove this because the filename gets too long otherwise
     # output_dir = f"T_{T:.2f}_time_{include_time}_lr_{lr}"

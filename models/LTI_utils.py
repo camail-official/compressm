@@ -66,9 +66,13 @@ def reduce_discrete_LTI(Lambdas, B, C, P, Q, rank=None):
     if rank is None:
         raise ValueError("Rank must be specified for reduction.")
     
+    # use the closest orthogonal matrix
     # get the transformation matrix
-    T = _balanced_realization_transformation(P, Q)
-    T_inv = la.inv(T)
+    T_orig = _balanced_realization_transformation(P, Q)
+    U, _, Vh = la.svd(T_orig)
+    T = U @ Vh  # ensure T is unitary
+    T_inv = T.T.conj()  # since T is unitary
+    #T_inv = la.inv(T)
 
     # reduce the system matrices
     A = np.matrix(np.diag(Lambdas))

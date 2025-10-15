@@ -26,8 +26,8 @@
   "use_embedding": true,
   "drop_rate": 0.0,
   "wandb": {
-    "project": "",
-    "entity": ""
+    "project": "compressm-LRU",
+    "entity": "camail"
   },
   "seeds": [
     123

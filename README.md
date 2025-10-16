@@ -1,4 +1,6 @@
-# Compre-SSM
+# CompreSSM
+
+This  repository contains the implementation for [CompreSSM](https://www.arxiv.org/abs/2510.02823) by [Makram Chahine](https://www.mit.edu/~chahine/), [Philipp Nazari](https://phnazari.github.io) [Daniela Rus](https://danielarus.csail.mit.edu) and [T. Konstantin Rusch](https://camail.org/). See also our [blog post](https://makramchahine.github.io/projects/compressm.html).
 
 
 This repository is an extension of [https://github.com/tk-rusch/linoss](https://github.com/tk-rusch/linoss) which is itself an extension of [https://github.com/Benjamin-Walker/log-neural-cdes](https://github.com/Benjamin-Walker/log-neural-cdes). 

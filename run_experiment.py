@@ -103,6 +103,11 @@ def run_experiments(model_names, dataset_names, experiment_folder):
                 tol = None
             red_steps = data.get("red_steps", 0)
             red_wait_steps = data.get("red_wait_steps", 0)
+            
+            # Get distillation settings (optional)
+            teacher_checkpoint = data.get("teacher_checkpoint", None)
+            distill_temperature = data.get("distill_temperature", 2.0)
+            distill_alpha = data.get("distill_alpha", 0.5)
             model_args = {
                 "num_blocks": num_blocks,
                 "hidden_dim": hidden_dim,
@@ -146,7 +151,10 @@ def run_experiments(model_names, dataset_names, experiment_folder):
                 "ssm_lr_factor": ssm_lr_factor,
                 "tol": tol,
                 "red_steps": red_steps,
-                "red_wait_steps": red_wait_steps
+                "red_wait_steps": red_wait_steps,
+                "teacher_checkpoint": teacher_checkpoint,
+                "distill_temperature": distill_temperature,
+                "distill_alpha": distill_alpha
             }
             run_fn = create_dataset_model_and_train
 

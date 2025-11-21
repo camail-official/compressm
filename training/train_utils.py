@@ -287,6 +287,79 @@ def regression_loss(diff_model, static_model, X, y, state, key, dual=False):
     )
 
 
+import jax
+import jax.numpy as jnp
+import equinox as eqx
+# Assuming 'calc_output' is defined elsewhere and returns PROBABILITIES
+
+@eqx.filter_jit
+@eqx.filter_value_and_grad(has_aux=True)
+def distillation_loss(
+    diff_student,
+    static_student,
+    teacher_model,
+    teacher_state,
+    X,
+    y,
+    state,
+    key,
+    temperature=2.0,
+    alpha=0.5,
+    dual=False,
+):
+    """
+    Computes distillation loss combining hard labels and soft teacher predictions.
+    
+    Since the model outputs probabilities (post-softmax), we need to work backwards
+    to get logits for proper temperature scaling in distillation.
+    
+    Note: teacher_state is separate from student state since they have different dimensions.
+    """
+    student_model = eqx.combine(diff_student, static_student)
+    
+    # Get student probabilities from forward pass
+    student_probs, state = calc_output(
+        student_model, X, state, key, student_model.stateful, student_model.nondeterministic, dual
+    )
+    
+    # Get teacher probabilities (no gradient, using teacher's own state)
+    teacher_probs, _ = calc_output(
+        teacher_model, X, teacher_state, key, teacher_model.stateful, teacher_model.nondeterministic, dual
+    )
+    
+    # Clip for numerical stability
+    epsilon = 1e-8
+    student_probs = jnp.clip(student_probs, epsilon, 1.0 - epsilon)
+    teacher_probs = jnp.clip(teacher_probs, epsilon, 1.0 - epsilon)
+    
+    # Hard loss: standard cross-entropy with true labels
+    hard_loss = jnp.mean(-jnp.sum(y * jnp.log(student_probs), axis=1))
+    
+    # Soft loss: We need to work with logits for temperature scaling
+    # Since model outputs softmax(logits), we recover logits via inverse:
+    # If p = softmax(z), then z = log(p) + C (where C cancels in softmax)
+    # For numerical stability with temperature, we use log-probabilities
+    student_log_probs = jnp.log(student_probs)
+    teacher_log_probs = jnp.log(teacher_probs)
+    
+    # Temperature-scaled softmax from log-probabilities
+    # softmax(log(p) / T) = softmax((z + C) / T) where z are the original logits
+    # This is approximately correct for temperature scaling
+    soft_student = jax.nn.softmax(student_log_probs / temperature, axis=1)
+    soft_teacher = jax.nn.softmax(teacher_log_probs / temperature, axis=1)
+    
+    # KL divergence: -sum(p_teacher * log(p_student))
+    soft_loss = jnp.mean(-jnp.sum(soft_teacher * jnp.log(soft_student + epsilon), axis=1))
+    
+    # Scale by T^2 (standard in distillation)
+    soft_loss = soft_loss * (temperature ** 2)
+    
+    # Combined loss
+    loss = alpha * soft_loss + (1 - alpha) * hard_loss
+    
+    return loss, state
+
+
 @eqx.filter_jit
 def make_step(model, filter_spec, X, y, loss_fn, state, opt, opt_state, key, use_multi_optimizer=False, dual=False):
     diff_model, static_model = eqx.partition(model, filter_spec)

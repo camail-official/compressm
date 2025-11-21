@@ -1,6 +1,6 @@
 {
   "seeds": [
-    42
+    123
   ],
   "data_dir": "/home/pnazari/workspace/compressm/data",
   "output_parent_dir": "",
@@ -21,16 +21,20 @@
   "lr": "0.001",
   "num_blocks": "1",
   "hidden_dim": "256",
-  "ssm_dim": "192",
+  "ssm_dim": "119",
   "weight_decay": 0.05,
   "use_warmup_cosine": true,
   "ssm_lr_factor": 0.1,
   "tol": -1,
-  "red_steps": 3000,
+  "red_steps": 0,
+  "red_wait_steps": 0,
   "use_embedding": true,
   "drop_rate": 0.2,
   "wandb": {
     "project": "",
     "entity": ""
-  }
+  },
+  "teacher_checkpoint": "outputs/lru/imdb_stuff/lr_0.001_num_blocks_1_hidden_dim_256_vf_depth_None_vf_width_None_ssm_dim_192_ssm_blocks_None_scale_1_lambd_None_use_embedding_True_drop_rate_0.2_dual_False_seed_123_warmup_3000/best_model.eqx",
+  "distill_temperature": 2.0,
+  "distill_alpha": 0.5
 }

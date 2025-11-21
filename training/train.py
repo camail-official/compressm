@@ -59,6 +59,7 @@ from training.train_utils import (
     truncate_optimizer_state,
     classification_loss,
     regression_loss,
+    distillation_loss,
     calc_output,
     make_step,
 )
@@ -92,6 +93,10 @@ def train_model(
     red_steps=1e10,
     red_wait_steps=0,
     dual=False,
+    teacher_model=None,
+    teacher_state=None,
+    distill_temperature=2.0,
+    distill_alpha=0.5,
 ):
 
     if metric == "accuracy":
@@ -139,7 +144,24 @@ def train_model(
         # For single optimizer, use parameters directly
         opt_state = opt.init(model_params)
 
-    if model.classification:
+    # Set up loss function (classification, regression, or distillation)
+    if teacher_model is not None:
+        # Use distillation loss
+        if not model.classification:
+            raise ValueError("Distillation currently only supports classification tasks")
+        
+        # Freeze teacher model
+        teacher_model = eqx.tree_inference(teacher_model, value=True)
+        
+        # Create distillation loss wrapper
+        def loss_fn(diff_model, static_model, X, y, state, key, dual):
+            return distillation_loss(
+                diff_model, static_model, teacher_model, teacher_state, X, y, state, key,
+                temperature=distill_temperature, alpha=distill_alpha, dual=dual
+            )
+        
+        print(f"Using distillation: temperature={distill_temperature}, alpha={distill_alpha}")
+    elif model.classification:
         loss_fn = classification_loss
     else:
         loss_fn = regression_loss
@@ -408,6 +430,13 @@ def train_model(
                     # Reset no validation improvement counter either to show improvement or to give reduced model time to converge
                     no_val_improvement = 0
 
+                    # TODO: save the checkpoint here
+                    model_path = os.path.join(output_dir, "best_model.eqx")
+                    state_path = os.path.join(output_dir, "best_state.eqx")
+                    eqx.tree_serialise_leaves(model_path, model)
+                    eqx.tree_serialise_leaves(state_path, state)
+                    print(f"New best model saved to {model_path} at step {best_step}")
+
                 # Update progress bar with metrics
                 pbar.set_postfix(
                     {
@@ -512,12 +541,15 @@ def create_dataset_model_and_train(
     red_steps=0,
     red_wait_steps=0,
     log_steps=100,
+    teacher_checkpoint=None,
+    distill_temperature=2.0,
+    distill_alpha=0.5,
 ):
     if model_name == "LinOSS":
         model_name_directory = model_name + "_" + linoss_discretization
     else:
         model_name_directory = model_name
-    output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name + "_stuff"
+    output_parent_dir += "outputs/" + model_name_directory + "/" + dataset_name
 
     # remove this because the filename gets too long otherwise
     # output_dir = f"T_{T:.2f}_time_{include_time}_lr_{lr}"
@@ -546,6 +578,8 @@ def create_dataset_model_and_train(
         output_dir += f"_warmup_{red_steps}"
     if red_wait_steps > 0:
         output_dir += f"_wait_{red_wait_steps}"
+    if teacher_checkpoint is not None:
+        output_dir += f"_distill_T{distill_temperature}_a{distill_alpha}"
 
     key = jr.PRNGKey(seed)
 
@@ -590,6 +624,47 @@ def create_dataset_model_and_train(
         **model_args,
         key=modelkey,
     )
+    
+    # Load teacher model for distillation if checkpoint provided
+    teacher_model = None
+    teacher_state = None
+    if teacher_checkpoint is not None:
+        print(f"Loading teacher model from {teacher_checkpoint}")
+        
+        # Infer teacher SSM dimension from checkpoint path
+        # Path format: .../ssm_dim_192_.../best_model.eqx
+        import re
+        teacher_dim_match = re.search(r'ssm_dim_(\d+)', teacher_checkpoint)
+        teacher_ssm_dim = 384  # NOTE hardcoded for cifar
+        
+        # Create teacher model args with teacher's SSM dimension
+        teacher_model_args = model_args.copy()
+        teacher_model_args["ssm_dim"] = teacher_ssm_dim
+        
+        # Create teacher model with teacher's architecture
+        teacherkey, key = jr.split(key, 2)
+        teacher_model, teacher_state = create_model(
+            model_name,
+            dataset.data_dim,
+            dataset.logsig_dim,
+            logsig_depth,
+            dataset.intervals,
+            dataset.label_dim,
+            classification=classification,
+            output_step=output_step,
+            linoss_discretization=linoss_discretization,
+            **teacher_model_args,
+            key=teacherkey,
+        )
+        # Load checkpoint
+        teacher_model = eqx.tree_deserialise_leaves(teacher_checkpoint, teacher_model)
+
+        teacher_state_checkpoint = teacher_checkpoint.replace("best_model.eqx", "best_state.eqx")
+            
+        # Load checkpoint state into the initialized state structure
+        teacher_state = eqx.tree_deserialise_leaves(teacher_state_checkpoint, teacher_state)
+
+        print(f"Teacher model loaded successfully (SSM dim: {teacher_ssm_dim})")
     filter_spec = jax.tree_util.tree_map(lambda _: True, model)
     if model_name == "nrde" or model_name == "log_ncde":
         dataloaders = dataset.path_dataloaders
@@ -631,4 +706,8 @@ def create_dataset_model_and_train(
         red_wait_steps=red_wait_steps,
         model_name=model_name,
         dual=dual,
+        teacher_model=teacher_model,
+        teacher_state=teacher_state,
+        distill_temperature=distill_temperature,
+        distill_alpha=distill_alpha,
     )

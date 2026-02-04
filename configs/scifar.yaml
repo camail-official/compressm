@@ -1,0 +1,37 @@
+# sCIFAR Configuration for Compre-SSM
+# Sequential CIFAR-10: 1024-step sequence classification (10 classes)
+
+# Dataset
+dataset: scifar
+
+# Model Architecture
+model:
+  num_blocks: 6           # Number of LRU blocks
+  state_dim: 384          # State dimension per block (N)
+  hidden_dim: 512         # Hidden dimension (H)
+  r_min: 0.9              # Minimum eigenvalue magnitude
+  r_max: 0.999            # Maximum eigenvalue magnitude
+  drop_rate: 0.0          # No dropout
+
+# Training Hyperparameters
+training:
+  num_steps: 180000       # Total training steps
+  batch_size: 50          # Batch size
+  lr: 0.001               # Base learning rate
+  weight_decay: 0.05      # AdamW weight decay
+  ssm_lr_factor: 0.25     # LR multiplier for SSM params
+  use_warmup_cosine: true # Use warmup + cosine annealing schedule
+  print_steps: 4500       # Evaluation frequency
+
+# Reduction Configuration
+# Mode options: "none", "tolerance", "fixed", "pragmatic"
+reduction:
+  mode: none              # Default: no reduction (baseline)
+  selection: largest      # Which states to keep: "largest", "smallest", "random"
+  tol: 0.95               # Fraction of Hankel energy to keep (0.95 = keep 95%, reduce ~5%)
+  red_steps: 180000       # Steps during which reduction is active
+  reduction_interval: 2000  # Steps between reductions (fixed/pragmatic)
+  reduction_fraction: 0.1   # Fraction to reduce each time (fixed/pragmatic)
+  performance_tolerance: 0.02  # Max accuracy drop before rollback (pragmatic)
+  method: sqrtm           # Balanced truncation method: "sqrtm" or "chol"
+  save_hsvs: false        # Save Hankel singular values for analysis plots

@@ -1,0 +1,38 @@
+# sMNIST Configuration for Compre-SSM
+# Sequential MNIST: 784-step sequence classification (10 classes)
+# NOTE: sMNIST uses a simpler architecture (1 block) than sCIFAR
+
+# Dataset
+dataset: smnist
+
+# Model Architecture
+model:
+  num_blocks: 1           # Single LRU block (sufficient for sMNIST)
+  state_dim: 256          # State dimension per block (N)
+  hidden_dim: 8           # Hidden dimension (H) - small for sMNIST
+  r_min: 0.9              # Minimum eigenvalue magnitude
+  r_max: 0.999            # Maximum eigenvalue magnitude
+  drop_rate: 0.0          # No dropout for sMNIST
+
+# Training Hyperparameters
+training:
+  num_steps: 200000       # Total training steps
+  batch_size: 50          # Batch size
+  lr: 0.0004              # Base learning rate
+  weight_decay: 0.0       # No weight decay
+  ssm_lr_factor: 1.0      # No separate SSM LR scaling
+  use_warmup_cosine: false # No warmup schedule
+  print_steps: 5000       # Evaluation frequency
+
+# Reduction Configuration
+# Mode options: "none", "tolerance", "fixed", "pragmatic"
+reduction:
+  mode: none              # Default: no reduction (baseline)
+  selection: largest      # Which states to keep: "largest", "smallest", "random"
+  tol: 0.95               # Fraction of Hankel energy to keep (0.95 = keep 95%, reduce ~5%)
+  red_steps: 20000        # Steps during which reduction is active
+  reduction_interval: 2000  # Steps between reductions (fixed/pragmatic)
+  reduction_fraction: 0.1   # Fraction to reduce each time (fixed/pragmatic)
+  performance_tolerance: 0.02  # Max accuracy drop before rollback (pragmatic)
+  method: sqrtm           # Balanced truncation method: "sqrtm" or "chol"
+  save_hsvs: false        # Save Hankel singular values for analysis plots

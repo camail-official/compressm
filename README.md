@@ -1,84 +1,111 @@
-# Compre-SSM
+<p align="center">
+  <img src="assets/matryoshka_compressm.png" width="600" alt="CompreSSM">
+</p>
 
-This  repository contains the implementation for the in-training compression of SSMs by [Makram Chahine](https://www.mit.edu/~chahine/)
+<h1 align="center">CompreSSM</h1>
 
+<p align="center">
+  <b>The Curious Case of In-Training Compression of State Space Models</b><br>
+  <a href="https://arxiv.org/abs/2510.02823">Paper</a> • ICLR 2026
+</p>
 
-This repository is an extension of [https://github.com/tk-rusch/linoss](https://github.com/tk-rusch/linoss) which is itself an extension of [https://github.com/Benjamin-Walker/log-neural-cdes](https://github.com/Benjamin-Walker/log-neural-cdes). 
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
+  <a href="https://github.com/google/jax"><img src="https://img.shields.io/badge/JAX-0.4+-green.svg" alt="JAX"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
 
---------------------
-## Requirements
+---
 
-This repository is implemented in python 3.10 and uses Jax as their machine learning framework.
+State Space Models (SSMs) offer parallelizable training and fast inference for long sequence modeling. At their core are recurrent dynamical systems with update costs scaling with state dimension. **CompreSSM** applies balanced truncation—a classical control-theoretic technique—*during training* to identify and remove low-influence states based on their Hankel singular values. Models that begin large and shrink during training achieve computational efficiency while maintaining higher performance than models trained directly at smaller dimension.
 
-### Environment
+---
 
-The code for preprocessing the datasets, training LinOSS, S5, LRU, NCDE, NRDE, and Log-NCDE uses the following packages:
-- `jax` and `jaxlib` for automatic differentiation.
-- `equinox` for constructing neural networks.
-- `optax` for neural network optimisers.
-- `diffrax` for differential equation solvers.
-- `signax` for calculating the signature.
-- `sktime` for handling time series data in ARFF format.
-- `tqdm` for progress bars.
-- `matplotlib` for plotting.
-- `pre-commit` for code formatting.
+## Installation
 
-```
-conda create -n compressm python=3.10
+```bash
+git clone https://github.com/camail-official/compressm.git
+cd compressm
+conda env create -f environment.yaml
 conda activate compressm
-conda install pre-commit=3.7.1 sktime=0.30.1 tqdm=4.66.4 matplotlib=3.8.4 -c conda-forge
-# Substitue for correct Jax pip install: https://jax.readthedocs.io/en/latest/installation.html
-pip install -U "jax[cuda12]" "jaxlib[cuda12]" equinox==0.11.4 optax==0.2.2 diffrax==0.5.1 signax==0.1.1
 ```
 
-After installing the requirements, run `pre-commit install` to install the pre-commit hooks.
+## Quick Start
 
----
+```bash
+# Train baseline (no compression)
+python scripts/train.py --config configs/paper/smnist_baseline.yaml --seed 42
 
-## Data
-
-The folder `data_dir` contains the scripts for downloading data, preprocessing the data, and creating dataloaders and 
-datasets. Raw data should be downloaded into the `data_dir/raw` folder. Processed data should be saved into the `data_dir/processed`
-folder in the following format: 
+# Train with τ=0.01 compression (discard 1% Hankel energy)
+python scripts/train.py --config configs/paper/smnist_tau0.01.yaml --seed 42
 ```
-processed/{collection}/{dataset_name}/data.pkl, 
-processed/{collection}/{dataset_name}/labels.pkl,
-processed/{collection}/{dataset_name}/original_idxs.pkl (if the dataset has original data splits)
+
+## Paper Reproduction
+
+Config files for all experiments are in `configs/paper/`:
+
+```bash
+# sMNIST (Table 2) - 10 seeds
+python scripts/reproduce.py configs/paper/smnist_baseline.yaml --seeds 8 42 123 456 789 101 202 303 404 505 --gpu 0
+python scripts/reproduce.py configs/paper/smnist_tau0.01.yaml --seeds 8 42 123 456 789 101 202 303 404 505 --gpu 0
+python scripts/reproduce.py configs/paper/smnist_tau0.02.yaml --seeds 8 42 123 456 789 101 202 303 404 505 --gpu 0
+python scripts/reproduce.py configs/paper/smnist_tau0.04.yaml --seeds 8 42 123 456 789 101 202 303 404 505 --gpu 0
+
+# sCIFAR (Table 3) - 5 seeds
+python scripts/reproduce.py configs/paper/scifar_baseline.yaml --seeds 8 42 123 456 789 --gpu 0
+python scripts/reproduce.py configs/paper/scifar_tau0.05.yaml --seeds 8 42 123 456 789 --gpu 0
+python scripts/reproduce.py configs/paper/scifar_tau0.10.yaml --seeds 8 42 123 456 789 --gpu 0
+python scripts/reproduce.py configs/paper/scifar_tau0.15.yaml --seeds 8 42 123 456 789 --gpu 0
+
+# Aggregate results
+python scripts/analyse_results.py outputs/paper/ --output results/
 ```
-where data.pkl and labels.pkl are jnp.arrays with shape (n_samples, n_timesteps, n_features) 
-and (n_samples, n_classes) respectively. If the dataset had original_idxs then those should
-be saved as a list of jnp.arrays with shape [(n_train,), (n_val,), (n_test,)].
----
 
-## Experiments
+### Expected Results
 
-The code for training and evaluating the models is contained in `train.py`. Experiments can be run using the `run_experiment.py` script. 
-This script requires you to specify the names of the models you want to train, 
-the names of the datasets you want to train on, and a directory which contains configuration files. By default,
-it will run the LinOSS experiments. The configuration files should be organised as `config_dir/{model_name}/{dataset_name}.json` and contain the
-following fields:
-- `seeds`: A list of seeds to use for training.
-- `data_dir`: The directory containing the data.
-- `output_parent_dir`: The directory to save the output.
-- `lr_scheduler`: A function which takes the learning rate and returns the new learning rate.
-- `num_steps`: The number of steps to train for.
-- `print_steps`: The number of steps between printing the loss.
-- `batch_size`: The batch size.
-- `metric`: The metric to use for evaluation.
-- `classification`: Whether the task is a classification task.
-- `linoss_discretization`: ONLY for LinoSS -- which discretization to use. Choices are ['IM','IMEX']
-- `lr`: The initial learning rate.
-- `time`: Whether to include time as a channel.
-- Any further specific model parameters. 
+| Config | Table | τ | Accuracy | Final Dim |
+|--------|-------|---|----------|-----------|
+| `smnist_baseline` | 2 | 0% | ~97.3% | 256 |
+| `smnist_tau0.01` | 2 | 1% | ~96.9% | ~47 |
+| `smnist_tau0.02` | 2 | 2% | ~96.9% | ~28 |
+| `smnist_tau0.04` | 2 | 4% | ~95.9% | ~13 |
+| `scifar_baseline` | 3 | 0% | ~86.5% | 2304 |
+| `scifar_tau0.05` | 3 | 5% | ~85.8% | ~161 |
+| `scifar_tau0.10` | 3 | 10% | ~85.7% | ~93 |
+| `scifar_tau0.15` | 3 | 15% | ~84.4% | ~57 |
 
-See `experiment_configs/repeats` for examples.
+## Code Structure
 
----
+```
+compressm/
+├── models/lru.py                  # LRU model with reduction
+├── reduction/
+│   ├── hsv.py                     # Hankel singular value computation
+│   └── balanced_truncation.py     # Balanced truncation algorithm
+├── training/trainer.py            # Training loop with in-training compression
+└── data/datasets.py               # sMNIST, sCIFAR loaders
 
-## Reproducing the Results
+configs/paper/                     # Paper reproduction configs
+scripts/
+├── train.py                       # Training CLI
+├── reproduce.py                   # Multi-seed reproduction
+└── analyse_results.py             # Results aggregation
+```
 
-The configuration files for all the experiments with fixed hyperparameters can be found in the `experiment_configs` folder and
-`run_experiment.py` is currently configured to run the repeat experiments on the UEA datasets.
-The `outputs` folder contains a zip file of the output files from the UEA, and PPG experiments. 
+## Citation
 
----
+```bibtex
+@misc{chahine2026curiouscaseintrainingcompression,
+      title={The Curious Case of In-Training Compression of State Space Models}, 
+      author={Makram Chahine and Philipp Nazari and Daniela Rus and T. Konstantin Rusch},
+      year={2026},
+      eprint={2510.02823},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2510.02823}, 
+}
+```
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.

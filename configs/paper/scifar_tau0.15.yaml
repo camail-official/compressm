@@ -1,0 +1,39 @@
+# sCIFAR τ=0.15 Configuration for Paper Reproduction
+# Paper Table 3: τ=0.15 (discard 15% energy → keep 85%)
+# Expected: final dim ~57.4±1.5, accuracy ~84.4±0.2%
+
+# Dataset
+dataset: scifar
+
+# Model Architecture (Paper Table 1)
+model:
+  num_blocks: 6           # Number of LRU blocks
+  state_dim: 384          # State dimension per block (N)
+  hidden_dim: 512         # Hidden dimension (H)
+  r_min: 0.9              # Minimum eigenvalue magnitude
+  r_max: 0.999            # Maximum eigenvalue magnitude
+  drop_rate: 0.1          # Dropout rate (Paper Table 1)
+
+# Training Hyperparameters (Paper Table 1)
+training:
+  num_steps: 180000       # Total training steps
+  batch_size: 50          # Batch size
+  lr: 0.001               # Base learning rate
+  weight_decay: 0.05      # AdamW weight decay
+  ssm_lr_factor: 0.25     # LR multiplier for SSM params
+  use_warmup_cosine: true # Use warmup + cosine annealing schedule
+  eval_steps: 4500        # Evaluation frequency
+
+# Reduction Configuration
+# Paper τ=0.15 (energy to discard) → code tol=0.85 (energy to keep)
+reduction:
+  mode: tolerance
+  selection: largest      # Keep states with largest HSVs
+  tol: 0.85               # 1 - τ = 1 - 0.15 = 0.85
+  red_start: 0            # Start reductions from step 0
+  red_end: 18000          # 10% of training (first 18k steps)
+  red_interval: 2000      # Check for reduction every 2000 steps
+  hsv_interval: 0         # No HSV logging
+  reduction_fraction: 0.1
+  performance_tolerance: 0.02
+  method: sqrtm

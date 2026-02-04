@@ -1,0 +1,39 @@
+# sMNIST τ=0.01 Configuration for Paper Reproduction
+# Paper Table 2: τ=0.01 (discard 1% energy → keep 99%)
+# Expected: final dim ~46.8±3.2, accuracy ~96.9±0.1%
+
+# Dataset
+dataset: smnist
+
+# Model Architecture (Paper Table 1)
+model:
+  num_blocks: 1           # Single LRU block
+  state_dim: 256          # State dimension (N)
+  hidden_dim: 8           # Hidden dimension (H)
+  r_min: 0.9              # Minimum eigenvalue magnitude
+  r_max: 0.999            # Maximum eigenvalue magnitude
+  drop_rate: 0.1          # Dropout rate (Paper Table 1)
+
+# Training Hyperparameters (Paper Table 1)
+training:
+  num_steps: 200000       # Total training steps
+  batch_size: 50          # Batch size
+  lr: 0.0004              # Base learning rate
+  weight_decay: 0.0       # No weight decay
+  ssm_lr_factor: 1.0      # No separate SSM LR scaling
+  use_warmup_cosine: false # No warmup schedule
+  eval_steps: 5000        # Evaluation frequency
+
+# Reduction Configuration
+# Paper τ=0.01 (energy to discard) → code tol=0.99 (energy to keep)
+reduction:
+  mode: tolerance
+  selection: largest      # Keep states with largest HSVs
+  tol: 0.99               # 1 - τ = 1 - 0.01 = 0.99
+  red_start: 0            # Start reductions from step 0
+  red_end: 20000          # 10% of training (first 20k steps)
+  red_interval: 2000      # Check for reduction every 2000 steps
+  hsv_interval: 0         # No HSV logging
+  reduction_fraction: 0.1
+  performance_tolerance: 0.02
+  method: sqrtm

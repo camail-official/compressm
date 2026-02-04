@@ -1,0 +1,38 @@
+# Conda environment file for Compre-SSM
+# Install with: conda env create -f environment.yaml
+# Or update with: conda env update -f environment.yaml
+
+name: compressm
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+
+dependencies:
+  # Python
+  - python>=3.10
+
+  # Core JAX ecosystem (use conda-forge for best compatibility)
+  - jax>=0.4.20
+  - jaxlib>=0.4.20
+  
+  # Scientific computing
+  - numpy>=1.24.0
+  - scipy>=1.10.0
+  
+  # PyTorch (for data loading only)
+  - pytorch>=2.0.0
+  - torchvision>=0.15.0
+  
+  # Configuration and utilities
+  - pyyaml>=6.0
+  - tqdm>=4.65.0
+  
+  # Optional: for analysis/plotting
+  - matplotlib>=3.7.0
+  
+  # Pip dependencies (not available on conda)
+  - pip
+  - pip:
+    - equinox>=0.11.0
+    - optax>=0.1.7

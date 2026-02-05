@@ -99,7 +99,6 @@ def parse_args():
     parser.add_argument(
         "--data-dir",
         type=str,
-        default="./data",
         help="Directory for dataset downloads",
     )
     
@@ -179,7 +178,8 @@ def main():
     
     # Create dataset
     dataset_key = jr.PRNGKey(training_config.seed)
-    dataset = create_dataset(dataset_name, key=dataset_key, data_dir=args.data_dir)
+    data_dir = args.data_dir or config.get("data_dir", "./data")
+    dataset = create_dataset(dataset_name, key=dataset_key, data_dir=data_dir)
     
     # Train
     model = train(

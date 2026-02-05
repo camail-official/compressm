@@ -210,7 +210,6 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     print(f"IMDB {level} level | min_freq {min_freq}")
     
     # Load dataset
-    cache_dir = os.path.join(data_dir, "imdb_cache")
     dataset = load_dataset("imdb", cache_dir=data_dir)
     dataset = DatasetDict(train=dataset["train"], test=dataset["test"])
     

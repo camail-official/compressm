@@ -1,0 +1,38 @@
+# Pathfinder Baseline Configuration
+# Dataset: Pathfinder (Resolution 32 implied by data_dir)
+# Baseline (no reduction)
+
+# Dataset
+dataset: pathfinder
+
+# Model Architecture
+model:
+  num_blocks: 6           # 6 LRU blocks
+  state_dim: 256          # State dimension (N) - mapped from ssm_dim
+  hidden_dim: 192         # Hidden dimension (H)
+  r_min: 0.9              # Minimum eigenvalue magnitude
+  r_max: 0.999            # Maximum eigenvalue magnitude
+  drop_rate: 0.0          # Dropout rate (0.0 as per JSON)
+
+# Training Hyperparameters
+training:
+  num_steps: 500000       # Total training steps
+  batch_size: 64          # Batch size
+  lr: 0.001               # Base learning rate
+  weight_decay: 0.05      # Weight decay applied
+  ssm_lr_factor: 0.25     # SSM LR scaling factor
+  use_warmup_cosine: true # Warmup schedule enabled
+  eval_steps: 12500       # Evaluation frequency (mapped from print_steps)
+
+# Reduction Configuration
+reduction:
+  mode: none              # Baseline: no reduction (tol = -1)
+  selection: largest
+  tol: 0.99
+  red_start: 0            # No red_wait_steps provided, assumed 0
+  red_end: 50000          # red_steps (50000)
+  red_interval: 100       # Mapped from log_steps
+  hsv_interval: 0         # No HSV logging
+  reduction_fraction: 0.1
+  performance_tolerance: 0.02
+  method: sqrtm

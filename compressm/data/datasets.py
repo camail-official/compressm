@@ -515,6 +515,57 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     return Dataset(name="listops", dataloaders=dataloaders, input_dim=1, output_dim=10, seq_len=l_max)
 
 
+class LazyPathfinderData:
+    """
+    Lazy loader for Pathfinder images to avoid loading all images into memory.
+    """
+    def __init__(self, samples, resolution, seq_len):
+        self.samples = samples # List of (path, label)
+        self.resolution = resolution
+        self.seq_len = seq_len
+        self.n = len(samples)
+
+    def __len__(self):
+        return self.n
+
+    def __getitem__(self, idx):
+        if isinstance(idx, (int, np.integer)):
+            return self._load_single(idx)
+        elif isinstance(idx, (slice, np.ndarray, list, jnp.ndarray)):
+            if isinstance(idx, slice):
+                indices = range(*idx.indices(self.n))
+            else:
+                indices = idx
+            
+            # Load images for the batch
+            batch_x = []
+            for i in indices:
+                batch_x.append(self._load_single(i))
+            return np.array(batch_x)
+        else:
+            raise TypeError(f"Invalid index type: {type(idx)}")
+
+    def _load_single(self, i):
+        p, _ = self.samples[i]
+        try:
+            img = Image.open(p).convert("L")
+            if img.size != (self.resolution, self.resolution):
+                img = img.resize((self.resolution, self.resolution))
+            # Normalize to [0, 1] as expected by most sequence models
+            return (np.array(img).flatten()[..., None] / 255.0).astype(np.float32)
+        except Exception as e:
+            # Fallback for missing/broken images
+            return np.zeros((self.seq_len, 1), dtype=np.float32)
+
+    @property
+    def shape(self):
+        return (self.n, self.seq_len, 1)
+    
+    @property
+    def dtype(self):
+        return np.float32
+
+
 def create_pathfinder(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     """
     Pathfinder dataset.
@@ -542,78 +593,83 @@ def create_pathfinder(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         
     print(f"Loading Pathfinder dataset from: {data_path}")
     
-    def load_images(root):
-         # Try to load from preprocessed .npz file first (much faster)
-         npz_path = os.path.join(root, f"pathfinder{resolution}_preprocessed.npz")
-         if os.path.exists(npz_path):
-             print(f"Loading preprocessed Pathfinder data from {npz_path}...")
-             data = np.load(npz_path, allow_pickle=True)
-             images = data['images'] # (N, H, W)
-             labels = data['labels']
-             if len(images.shape) == 3:
-                 images = images.reshape(images.shape[0], -1) # Flatten
-             return images[..., None], labels
+    # Try to load from preprocessed .npz file first (fastest)
+    npz_path = os.path.join(data_path, f"pathfinder{resolution}_preprocessed.npz")
+    if os.path.exists(npz_path):
+        print(f"Loading preprocessed Pathfinder data from {npz_path}...")
+        data = np.load(npz_path, allow_pickle=True)
+        images = data['images'] # (N, H, W)
+        labels = data['labels']
+        if len(images.shape) == 3:
+            images = images.reshape(images.shape[0], -1) # Flatten
+        
+        # Still load .npz into memory as it's typically faster than lazy disk IO
+        X = jnp.array(images[..., None])
+        Y = jnp.array(labels)
+    else:
+        # Fallback to individual image loading (Lazy)
+        samples = []
+        base = os.path.join(data_path, "curv_baseline")
+        if not os.path.exists(base):
+            base = data_path
+            
+        metadata_dir = os.path.join(base, "metadata")
+        print(f"Checking metadata directory: {metadata_dir}")
+        
+        if os.path.exists(metadata_dir):
+            files = sorted(glob.glob(os.path.join(metadata_dir, "*.npy")) + glob.glob(os.path.join(metadata_dir, "*.txt")))
+            
+            print(f"Parsing {len(files)} metadata files...")
+            for fpath in files:
+                 try:
+                     with open(fpath, "r") as f:
+                         lines = f.read().splitlines()
+                         for line in lines:
+                             parts = line.split()
+                             if len(parts) >= 4:
+                                 img_rel = os.path.join(parts[0], parts[1])
+                                 label = int(parts[3])
+                                 img_full = os.path.join(base, img_rel)
+                                 samples.append((img_full, label))
+                 except:
+                     pass
+        
+        if not samples:
+            raise ValueError(f"No valid image samples found in {data_path}")
+            
+        print(f"Found {len(samples)} samples. Initializing lazy loading...")
+        
+        # Shuffle samples upfront so train/val/test splits are randomized
+        split_key, key = jr.split(key)
+        idxs = np.array(jr.permutation(split_key, len(samples)))
+        samples = [samples[i] for i in idxs]
+        
+        n = len(samples)
+        n_train = int(n * 0.8)
+        n_val = int(n * 0.1)
+        
+        train_samples = samples[:n_train]
+        val_samples = samples[n_train:n_train+n_val]
+        test_samples = samples[n_train+n_val:]
+        
+        def samples_to_y(s):
+            return jnp.array([l for _, l in s])
+            
+        def to_onehot(y):
+            oh = jnp.zeros((len(y), output_dim))
+            return oh.at[jnp.arange(len(y)), y.astype(int)].set(1)
 
-         # Fallback to individual image loading
-         samples = []
-         base = os.path.join(root, "curv_baseline")
-         if not os.path.exists(base):
-             base = root
-             
-         metadata_dir = os.path.join(base, "metadata")
-         print(f"Checking metadata directory: {metadata_dir}")
-         
-         if os.path.exists(metadata_dir):
-             # Try both .npy and .txt
-             files = sorted(glob.glob(os.path.join(metadata_dir, "*.npy")) + glob.glob(os.path.join(metadata_dir, "*.txt")))
-             
-             print(f"Parsing {len(files)} metadata files...")
-             for fpath in files:
-                  try:
-                      with open(fpath, "r") as f:
-                          lines = f.read().splitlines()
-                          for line in lines:
-                              parts = line.split()
-                              if len(parts) >= 4:
-                                  # Format: folder image_name ... label
-                                  img_rel = os.path.join(parts[0], parts[1])
-                                  label = int(parts[3])
-                                  img_full = os.path.join(base, img_rel)
-                                  # Skip os.path.exists check here for speed on Lustre
-                                  samples.append((img_full, label))
-                  except:
-                      pass
-         
-         if not samples:
-             raise ValueError(f"No valid image samples found in {data_path}")
-             
-         print(f"Found {len(samples)} samples. Loading images...")
-         X = []
-         Y = []
-         for p, l in tqdm(samples, desc="Loading images"):
-             try:
-                 img = Image.open(p).convert("L")
-                 if img.size != (resolution, resolution):
-                     img = img.resize((resolution, resolution))
-                 X.append(np.array(img).flatten())
-                 Y.append(l)
-             except:
-                 pass
-                 
-         if len(X) == 0:
-             raise ValueError(f"Failed to load any images from {data_path}")
-             
-         return np.array(X)[..., None], np.array(Y)
+        dataloaders = {
+            "train": Dataloader(LazyPathfinderData(train_samples, resolution, seq_len), to_onehot(samples_to_y(train_samples))),
+            "val": Dataloader(LazyPathfinderData(val_samples, resolution, seq_len), to_onehot(samples_to_y(val_samples))),
+            "test": Dataloader(LazyPathfinderData(test_samples, resolution, seq_len), to_onehot(samples_to_y(test_samples))),
+        }
+        return Dataset(name="pathfinder", dataloaders=dataloaders, input_dim=input_dim, output_dim=output_dim, seq_len=seq_len)
 
-    X_np, Y_np = load_images(data_path)
-    X = jnp.array(X_np)
-    Y = jnp.array(Y_np)
+    # If we loaded from .npz (Not Lazy)
     n = len(X)
-    
-    # Shuffle and split
     split_key, key = jr.split(key)
     idxs = jr.permutation(split_key, n)
-    
     n_train = int(n * 0.8)
     n_val = int(n * 0.1)
     

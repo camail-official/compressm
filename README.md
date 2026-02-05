@@ -50,6 +50,12 @@ path/to/lra_release/
   listops/
 ```
 
+**Note on Pathfinder:** For optimal performance, preprocess the Pathfinder dataset into a single `.npz` file:
+```bash
+python scripts/preprocess_pathfinder.py --data-dir /path/to/lra_release/pathfinder32 --resolution 32
+```
+This creates `pathfinder32_preprocessed.npz` which loads faster than individual image files.
+
 ## Quick Start
 
 ```bash

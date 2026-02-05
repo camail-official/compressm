@@ -19,7 +19,8 @@ import torchtext
 from torchtext import vocab as tf_vocab
 from PIL import Image
 import glob
-from tqdm import tqdm
+import pickle
+from concurrent.futures import ThreadPoolExecutor
 
 from compressm.data.dataloaders import Dataloader
 
@@ -204,75 +205,84 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     print(f"IMDB {level} level | min_freq {min_freq}")
     print(f"Loading IMDB dataset from: {data_dir}")
     
-    # Load dataset
-    dataset = load_dataset("imdb", cache_dir=data_dir)
-    dataset = DatasetDict(train=dataset["train"], test=dataset["test"])
-    
-    # Tokenizer
-    if level == "word":
-        tokenizer = torchtext.data.utils.get_tokenizer("spacy", language="en_core_web_sm")
+    cache_path = os.path.join(data_dir, f"imdb_{level}_processed")
+    if os.path.exists(cache_path):
+        print(f"Loading processed IMDB from cache: {cache_path}")
+        dataset = DatasetDict.load_from_disk(cache_path)
+        with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:
+            vocab = pickle.load(f)
     else:
-        tokenizer = list 
+        # Load dataset
+        dataset = load_dataset("imdb", cache_dir=data_dir)
+        dataset = DatasetDict(train=dataset["train"], test=dataset["test"])
         
-    l_max_tokens = l_max - int(append_bos) - int(append_eos)
-    
-    def tokenize(example):
-        return {"tokens": tokenizer(example["text"])[:l_max_tokens]}
-        
-    dataset = dataset.map(
-        tokenize,
-        remove_columns=["text"],
-        keep_in_memory=True,
-        load_from_cache_file=False,
-        # num_proc=4, # Avoid multiprocessing issues in some envs
-    )
-    
-    # Build vocab
-    vocab = tf_vocab.build_vocab_from_iterator(
-        dataset["train"]["tokens"],
-        min_freq=min_freq,
-        specials=(
-            ["<pad>", "<unk>"]
-            + (["<bos>"] if append_bos else [])
-            + (["<eos>"] if append_eos else [])
-        ),
-    )
-    vocab.set_default_index(vocab["<unk>"])
-    
-    def numericalize(example):
-        tokens = (
-            (["<bos>"] if append_bos else [])
-            + example["tokens"]
-            + (["<eos>"] if append_eos else [])
-        )
-        ids = vocab(tokens)
-        # Pad or truncate to fixed size
-        if len(ids) < l_max:
-            ids = ids + [vocab["<pad>"]] * (l_max - len(ids))
+        # Tokenizer
+        if level == "word":
+            tokenizer = torchtext.data.utils.get_tokenizer("spacy", language="en_core_web_sm")
         else:
-            ids = ids[:l_max]
-        return {"input_ids": ids}
+            tokenizer = list 
+            
+        l_max_tokens = l_max - int(append_bos) - int(append_eos)
+        
+        def tokenize(example):
+            return {"tokens": tokenizer(example["text"])[:l_max_tokens]}
+            
+        dataset = dataset.map(
+            tokenize,
+            remove_columns=["text"],
+            num_proc=4,
+        )
+        
+        # Build vocab
+        vocab = tf_vocab.build_vocab_from_iterator(
+            dataset["train"]["tokens"],
+            min_freq=min_freq,
+            specials=(
+                ["<pad>", "<unk>"]
+                + (["<bos>"] if append_bos else [])
+                + (["<eos>"] if append_eos else [])
+            ),
+        )
+        vocab.set_default_index(vocab["<unk>"])
+        
+        def numericalize(example):
+            tokens = (
+                (["<bos>"] if append_bos else [])
+                + example["tokens"]
+                + (["<eos>"] if append_eos else [])
+            )
+            ids = vocab(tokens)
+            # Pad or truncate to fixed size
+            if len(ids) < l_max:
+                ids = ids + [vocab["<pad>"]] * (l_max - len(ids))
+            else:
+                ids = ids[:l_max]
+            return {"input_ids": ids}
 
-    dataset = dataset.map(
-        numericalize,
-        remove_columns=["tokens"],
-        keep_in_memory=True,
-        load_from_cache_file=False,
-    )
+        dataset = dataset.map(
+            numericalize,
+            remove_columns=["tokens"],
+            num_proc=4,
+        )
+        
+        # Save to cache
+        print(f"Saving processed IMDB to cache: {cache_path}")
+        dataset.save_to_disk(cache_path)
+        with open(os.path.join(cache_path, "vocab.pkl"), "wb") as f:
+            pickle.dump(vocab, f)
     
+    # Extract data using numpy format for speed
     dataset.set_format(type="numpy", columns=["input_ids", "label"])
-    
-    # Extract data
     x_train = dataset["train"]["input_ids"]
     y_train = dataset["train"]["label"]
     x_test = dataset["test"]["input_ids"]
     y_test = dataset["test"]["label"]
     
-    # Convert to JAX arrays (expand dim for feature dimension)
+    # Convert to JAX arrays once (in memory for speed)
     x_train = jnp.array(x_train)[..., None] 
     x_test = jnp.array(x_test)[..., None]
-    y_train = jnp.array(y_train)
-    y_test = jnp.array(y_test)
+    y_train = jnp.array(y_train).astype(int)
+    y_test = jnp.array(y_test).astype(int)
     
     # One-hot labels
     train_onehot = jnp.zeros((len(y_train), 2))
@@ -284,9 +294,9 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     if val_split == 0.0:
         # Use test set as val set
         dataloaders = {
-            "train": Dataloader(x_train, train_onehot),
-            "val": Dataloader(x_test, test_onehot), # Use test as val
-            "test": Dataloader(x_test, test_onehot),
+            "train": Dataloader(x_train, train_onehot, inmemory=True),
+            "val": Dataloader(x_test, test_onehot, inmemory=True), # Use test as val
+            "test": Dataloader(x_test, test_onehot, inmemory=True),
         }
     else:
         split_key, key = jr.split(key)
@@ -297,9 +307,9 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         val_idxs = idxs[:val_size]
         
         dataloaders = {
-            "train": Dataloader(x_train[train_idxs], train_onehot[train_idxs]),
-            "val": Dataloader(x_train[val_idxs], train_onehot[val_idxs]),
-            "test": Dataloader(x_test, test_onehot),
+            "train": Dataloader(x_train[train_idxs], train_onehot[train_idxs], inmemory=True),
+            "val": Dataloader(x_train[val_idxs], train_onehot[val_idxs], inmemory=True),
+            "test": Dataloader(x_test, test_onehot, inmemory=True),
         }
 
     return Dataset(
@@ -325,99 +335,99 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
          # But for now we assume it exists as per reference
          pass 
 
-    dataset = load_dataset(
-        "csv",
-        data_files={
-            "train": os.path.join(data_path, "new_aan_pairs.train.tsv"),
-            "val": os.path.join(data_path, "new_aan_pairs.eval.tsv"),
-            "test": os.path.join(data_path, "new_aan_pairs.test.tsv"),
-        },
-        delimiter="\t",
-        column_names=["label", "input1_id", "input2_id", "text1", "text2"],
-        keep_in_memory=True,
-    )
-    dataset = dataset.remove_columns(["input1_id", "input2_id"])
-    
-    tokenizer = list
-    l_max_tokens = l_max - int(append_bos) - int(append_eos)
+    cache_path = os.path.join(data_dir, "aan_processed")
+    if os.path.exists(cache_path):
+        print(f"Loading processed AAN from cache: {cache_path}")
+        dataset = DatasetDict.load_from_disk(cache_path)
+        with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:
+            vocab = pickle.load(f)
+    else:
+        dataset = load_dataset(
+            "csv",
+            data_files={
+                "train": os.path.join(data_path, "new_aan_pairs.train.tsv"),
+                "val": os.path.join(data_path, "new_aan_pairs.eval.tsv"),
+                "test": os.path.join(data_path, "new_aan_pairs.test.tsv"),
+            },
+            delimiter="\t",
+            column_names=["label", "input1_id", "input2_id", "text1", "text2"],
+        )
+        dataset = dataset.remove_columns(["input1_id", "input2_id"])
+        
+        tokenizer = list
+        l_max_tokens = l_max - int(append_bos) - int(append_eos)
 
-    def tokenize(example):
-        return {
-            "tokens1": tokenizer(example["text1"])[:l_max_tokens],
-            "tokens2": tokenizer(example["text2"])[:l_max_tokens],
-        }
-        
-    dataset = dataset.map(
-        tokenize,
-        remove_columns=["text1", "text2"],
-        keep_in_memory=True,
-        load_from_cache_file=False,
-    )
-
-    vocab = tf_vocab.build_vocab_from_iterator(
-        dataset["train"]["tokens1"] + dataset["train"]["tokens2"],
-        specials=(
-            ["<pad>", "<unk>"]
-            + (["<bos>"] if append_bos else [])
-            + (["<eos>"] if append_eos else [])
-        ),
-    )
-    vocab.set_default_index(vocab["<unk>"])
-
-    def numericalize(example):
-        t1 = (["<bos>"] if append_bos else []) + example["tokens1"] + (["<eos>"] if append_eos else [])
-        t2 = (["<bos>"] if append_bos else []) + example["tokens2"] + (["<eos>"] if append_eos else [])
-        
-        id1 = vocab(t1)
-        id2 = vocab(t2)
-                
-        # Determine max length for this pair to pad equally if we were batching dynamically
-        # Standard LRA AAN task involves classifying the relationship between two documents.
-        # We concatenate them along the sequence dimension.
-        # Implementation: Concatenate tokens [d1] [SEP] [d2] where padding is used as separator.
-        
-        ids1 = id1
-        ids2 = id2
-        
-        # Truncate to half max each? Or fill?
-        # Let's use 2048 each.
-        half = l_max // 2
-        ids1 = ids1[:half]
-        ids2 = ids2[:half]
-        
-        full_ids = ids1 + [vocab["<pad>"]] + ids2 # Add a separator/pad
-        
-        if len(full_ids) < l_max:
-            full_ids = full_ids + [vocab["<pad>"]] * (l_max - len(full_ids))
-        else:
-            full_ids = full_ids[:l_max]
+        def tokenize(example):
+            return {
+                "tokens1": tokenizer(example["text1"])[:l_max_tokens],
+                "tokens2": tokenizer(example["text2"])[:l_max_tokens],
+            }
             
-        return {"input_ids": full_ids}
+        dataset = dataset.map(
+            tokenize,
+            remove_columns=["text1", "text2"],
+            num_proc=4,
+        )
 
-    dataset = dataset.map(
-        numericalize,
-        remove_columns=["tokens1", "tokens2"],
-        keep_in_memory=True,
-        load_from_cache_file=False,
-    )
+        vocab = tf_vocab.build_vocab_from_iterator(
+            dataset["train"]["tokens1"] + dataset["train"]["tokens2"],
+            specials=(
+                ["<pad>", "<unk>"]
+                + (["<bos>"] if append_bos else [])
+                + (["<eos>"] if append_eos else [])
+            ),
+        )
+        vocab.set_default_index(vocab["<unk>"])
+
+        def numericalize(example):
+            t1 = (["<bos>"] if append_bos else []) + example["tokens1"] + (["<eos>"] if append_eos else [])
+            t2 = (["<bos>"] if append_bos else []) + example["tokens2"] + (["<eos>"] if append_eos else [])
+            
+            id1 = vocab(t1)
+            id2 = vocab(t2)
+                    
+            half = l_max // 2
+            ids1 = id1[:half]
+            ids2 = id2[:half]
+            
+            full_ids = ids1 + [vocab["<pad>"]] + ids2 
+            
+            if len(full_ids) < l_max:
+                full_ids = full_ids + [vocab["<pad>"]] * (l_max - len(full_ids))
+            else:
+                full_ids = full_ids[:l_max]
+                
+            return {"input_ids": full_ids}
+
+        dataset = dataset.map(
+            numericalize,
+            remove_columns=["tokens1", "tokens2"],
+            num_proc=4,
+        )
+        
+        # Save to cache
+        print(f"Saving processed AAN to cache: {cache_path}")
+        dataset.save_to_disk(cache_path)
+        with open(os.path.join(cache_path, "vocab.pkl"), "wb") as f:
+            pickle.dump(vocab, f)
     
     dataset.set_format(type="numpy", columns=["input_ids", "label"])
     
     x_train = jnp.array(dataset["train"]["input_ids"])[..., None]
-    y_train = jnp.array(dataset["train"]["label"])
+    y_train = jnp.array(dataset["train"]["label"]).astype(int)
     x_val = jnp.array(dataset["val"]["input_ids"])[..., None]
-    y_val = jnp.array(dataset["val"]["label"])
+    y_val = jnp.array(dataset["val"]["label"]).astype(int)
     x_test = jnp.array(dataset["test"]["input_ids"])[..., None]
-    y_test = jnp.array(dataset["test"]["label"])
+    y_test = jnp.array(dataset["test"]["label"]).astype(int)
     
     def to_onehot(y):
         oh = jnp.zeros((len(y), 2))
         return oh.at[jnp.arange(len(y)), y].set(1)
 
     dataloaders = {
-        "train": Dataloader(x_train, to_onehot(y_train)),
-        "val": Dataloader(x_val, to_onehot(y_val)),
-        "test": Dataloader(x_test, to_onehot(y_test)),
+        "train": Dataloader(x_train, to_onehot(y_train), inmemory=True),
+        "val": Dataloader(x_val, to_onehot(y_val), inmemory=True),
+        "test": Dataloader(x_test, to_onehot(y_test), inmemory=True),
     }
 
     return Dataset(name="aan", dataloaders=dataloaders, input_dim=1, output_dim=2, seq_len=l_max)
@@ -436,80 +446,90 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     if not os.path.exists(data_path):
          pass
 
-    dataset = load_dataset(
-        "csv",
-        data_files={
-            "train": os.path.join(data_path, "basic_train.tsv"),
-            "val": os.path.join(data_path, "basic_val.tsv"),
-            "test": os.path.join(data_path, "basic_test.tsv"),
-        },
-        delimiter="\t",
-        keep_in_memory=True,
-    )
-
-    def listops_tokenizer(s):
-        return s.translate({ord("]"): ord("X"), ord("("): None, ord(")"): None}).split()
-
-    tokenizer = listops_tokenizer
-    l_max_tokens = l_max - int(append_bos) - int(append_eos)
-    
-    def tokenize(example):
-        return {"tokens": tokenizer(example["Source"])[:l_max_tokens]}
-
-    dataset = dataset.map(
-        tokenize,
-        remove_columns=["Source"],
-        keep_in_memory=True,
-        load_from_cache_file=False,
-    )
-    
-    vocab = tf_vocab.build_vocab_from_iterator(
-        dataset["train"]["tokens"],
-        specials=(
-            ["<pad>", "<unk>"]
-            + (["<bos>"] if append_bos else [])
-            + (["<eos>"] if append_eos else [])
-        ),
-    )
-    vocab.set_default_index(vocab["<unk>"])
-    
-    def numericalize(example):
-        tokens = (
-            (["<bos>"] if append_bos else [])
-            + example["tokens"]
-            + (["<eos>"] if append_eos else [])
+    cache_path = os.path.join(data_dir, "listops_processed")
+    if os.path.exists(cache_path):
+        print(f"Loading processed ListOps from cache: {cache_path}")
+        dataset = DatasetDict.load_from_disk(cache_path)
+        with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:
+            vocab = pickle.load(f)
+    else:
+        dataset = load_dataset(
+            "csv",
+            data_files={
+                "train": os.path.join(data_path, "basic_train.tsv"),
+                "val": os.path.join(data_path, "basic_val.tsv"),
+                "test": os.path.join(data_path, "basic_test.tsv"),
+            },
+            delimiter="\t",
         )
-        ids = vocab(tokens)
-        if len(ids) < l_max:
-            ids = ids + [vocab["<pad>"]] * (l_max - len(ids))
-        else:
-            ids = ids[:l_max]
-        return {"input_ids": ids}
 
-    dataset = dataset.map(
-        numericalize,
-        remove_columns=["tokens"],
-        keep_in_memory=True,
-        load_from_cache_file=False,
-    )
+        def listops_tokenizer(s):
+            return s.translate({ord("]"): ord("X"), ord("("): None, ord(")"): None}).split()
+
+        tokenizer = listops_tokenizer
+        l_max_tokens = l_max - int(append_bos) - int(append_eos)
+        
+        def tokenize(example):
+            return {"tokens": tokenizer(example["Source"])[:l_max_tokens]}
+
+        dataset = dataset.map(
+            tokenize,
+            remove_columns=["Source"],
+            num_proc=4,
+        )
+        
+        vocab = tf_vocab.build_vocab_from_iterator(
+            dataset["train"]["tokens"],
+            specials=(
+                ["<pad>", "<unk>"]
+                + (["<bos>"] if append_bos else [])
+                + (["<eos>"] if append_eos else [])
+            ),
+        )
+        vocab.set_default_index(vocab["<unk>"])
+        
+        def numericalize(example):
+            tokens = (
+                (["<bos>"] if append_bos else [])
+                + example["tokens"]
+                + (["<eos>"] if append_eos else [])
+            )
+            ids = vocab(tokens)
+            if len(ids) < l_max:
+                ids = ids + [vocab["<pad>"]] * (l_max - len(ids))
+            else:
+                ids = ids[:l_max]
+            return {"input_ids": ids}
+
+        dataset = dataset.map(
+            numericalize,
+            remove_columns=["tokens"],
+            num_proc=4,
+        )
+        
+        # Save to cache
+        print(f"Saving processed ListOps to cache: {cache_path}")
+        dataset.save_to_disk(cache_path)
+        with open(os.path.join(cache_path, "vocab.pkl"), "wb") as f:
+            pickle.dump(vocab, f)
     
     dataset.set_format(type="numpy", columns=["input_ids", "Target"])
     
     x_train = jnp.array(dataset["train"]["input_ids"])[..., None]
-    y_train = jnp.array(dataset["train"]["Target"])
+    y_train = jnp.array(dataset["train"]["Target"]).astype(int)
     x_val = jnp.array(dataset["val"]["input_ids"])[..., None]
-    y_val = jnp.array(dataset["val"]["Target"])
+    y_val = jnp.array(dataset["val"]["Target"]).astype(int)
     x_test = jnp.array(dataset["test"]["input_ids"])[..., None]
-    y_test = jnp.array(dataset["test"]["Target"])
+    y_test = jnp.array(dataset["test"]["Target"]).astype(int)
     
     def to_onehot(y):
         oh = jnp.zeros((len(y), 10))
         return oh.at[jnp.arange(len(y)), y].set(1)
         
     dataloaders = {
-        "train": Dataloader(x_train, to_onehot(y_train)),
-        "val": Dataloader(x_val, to_onehot(y_val)),
-        "test": Dataloader(x_test, to_onehot(y_test)),
+        "train": Dataloader(x_train, to_onehot(y_train), inmemory=True),
+        "val": Dataloader(x_val, to_onehot(y_val), inmemory=True),
+        "test": Dataloader(x_test, to_onehot(y_test), inmemory=True),
     }
     
     return Dataset(name="listops", dataloaders=dataloaders, input_dim=1, output_dim=10, seq_len=l_max)
@@ -524,6 +544,7 @@ class LazyPathfinderData:
         self.resolution = resolution
         self.seq_len = seq_len
         self.n = len(samples)
+        self.executor = ThreadPoolExecutor(max_workers=8)
 
     def __len__(self):
         return self.n
@@ -537,10 +558,8 @@ class LazyPathfinderData:
             else:
                 indices = idx
             
-            # Load images for the batch
-            batch_x = []
-            for i in indices:
-                batch_x.append(self._load_single(i))
+            # Load images for the batch in parallel
+            batch_x = list(self.executor.map(self._load_single, indices))
             return np.array(batch_x)
         else:
             raise TypeError(f"Invalid index type: {type(idx)}")

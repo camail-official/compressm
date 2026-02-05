@@ -25,14 +25,6 @@ from typing import Optional
 
 from compressm.data.dataloaders import Dataloader
 
-# Lustre filesystem fixes for Hugging Face datasets
-try:
-    import datasets.utils.file_utils as file_utils
-    from filelock import SoftFileLock
-    file_utils.FileLock = SoftFileLock
-except ImportError:
-    pass
-
 
 @dataclass
 class Dataset:
@@ -237,6 +229,8 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:
             vocab = pickle.load(f)
     else:
+        # Default save path if none found
+        cache_path = potential_caches[0] # Use reference style as default
         # Load dataset
         dataset = load_dataset("imdb", cache_dir=data_dir)
         dataset = DatasetDict(train=dataset["train"], test=dataset["test"])
@@ -390,6 +384,8 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:
             vocab = pickle.load(f)
     else:
+        # Default save path if none found
+        cache_path = potential_caches[1] # Use standard nested style as default (potential_caches[1])
         dataset = load_dataset(
             "csv",
             data_files={
@@ -569,6 +565,8 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:
             vocab = pickle.load(f)
     else:
+        # Default save path if none found
+        cache_path = potential_caches[1] # Use standard nested style as default
         dataset = load_dataset(
             "csv",
             data_files={

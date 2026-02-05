@@ -232,7 +232,7 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         # Default save path if none found
         cache_path = potential_caches[0] # Use reference style as default
         # Load dataset
-        dataset = load_dataset("imdb", cache_dir=data_dir)
+        dataset = load_dataset("imdb", name="plain_text", cache_dir=data_dir)
         dataset = DatasetDict(train=dataset["train"], test=dataset["test"])
         
         # Tokenizer

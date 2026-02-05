@@ -592,7 +592,7 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     y_train = jnp.array(dataset["train"]["Target"]).astype(int)
     x_val = jnp.array(x_val)[..., None]
     y_val = jnp.array(dataset["val"]["Target"]).astype(int)
-    x_test = jnp.array(dataset["test"]["input_ids"])[..., None]
+    x_test = jnp.array(x_test)[..., None]
     y_test = jnp.array(dataset["test"]["Target"]).astype(int)
     
     def to_onehot(y):

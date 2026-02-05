@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Compre-SSM Training CLI
+CompreSSM Training CLI
 
 Train LRU models with optional in-training compression on sMNIST/sCIFAR.
 
@@ -39,7 +39,7 @@ from compressm.training.trainer import (
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Train Compre-SSM models with in-training compression",
+        description="Train CompreSSM models with in-training compression",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     
@@ -161,7 +161,7 @@ def main():
     
     # Print configuration
     print("\n" + "="*60)
-    print("Compre-SSM Training")
+    print("CompreSSM Training")
     print("="*60)
     print(f"\nDataset: {dataset_name}")
     print(f"Model: {model_config.num_blocks} blocks × {model_config.state_dim} state dim × {model_config.hidden_dim} hidden dim")

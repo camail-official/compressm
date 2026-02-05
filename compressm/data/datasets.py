@@ -21,6 +21,7 @@ from PIL import Image
 import glob
 import pickle
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 from compressm.data.dataloaders import Dataloader
 
@@ -42,6 +43,8 @@ class Dataset:
     input_dim: int
     output_dim: int
     seq_len: int
+    vocab_size: Optional[int] = None
+    use_embedding: bool = False
 
 
 def create_smnist(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
@@ -114,6 +117,7 @@ def create_smnist(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         input_dim=1,
         output_dim=10,
         seq_len=784,
+        use_embedding=False
     )
 
 
@@ -188,6 +192,7 @@ def create_scifar(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         input_dim=3,
         output_dim=10,
         seq_len=1024,
+        use_embedding=False
     )
 
 def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
@@ -205,15 +210,29 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     print(f"IMDB {level} level | min_freq {min_freq}")
     print(f"Loading IMDB dataset from: {data_dir}")
     
-    cache_path = os.path.join(data_dir, f"imdb_{level}_processed")
-    if os.path.exists(cache_path):
+    # Check both potential cache locations
+    cache_dir_name = f"l_max-{l_max}-level-{level}-min_freq-{min_freq}-append_bos-{append_bos}-append_eos-{append_eos}"
+    potential_caches = [
+        os.path.join(data_dir, "imdb", "cache", cache_dir_name), # Reference style
+        os.path.join(data_dir, f"imdb_{level}_processed"),      # Our flattened style
+    ]
+    
+    cache_path = None
+    for p in potential_caches:
+        if os.path.exists(p):
+            cache_path = p
+            break
+            
+    if cache_path:
         print(f"Loading processed IMDB from cache: {cache_path}")
         dataset = DatasetDict.load_from_disk(cache_path)
         with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:
             vocab = pickle.load(f)
     else:
+        # Default save path if none found
+        cache_path = potential_caches[0] # Use reference style as default
         # Load dataset
-        dataset = load_dataset("imdb", cache_dir=data_dir)
+        dataset = load_dataset("imdb", name="plain_text", cache_dir=data_dir)
         dataset = DatasetDict(train=dataset["train"], test=dataset["test"])
         
         # Tokenizer
@@ -230,6 +249,8 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         dataset = dataset.map(
             tokenize,
             remove_columns=["text"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
         
@@ -245,23 +266,19 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         )
         vocab.set_default_index(vocab["<unk>"])
         
-        def numericalize(example):
-            tokens = (
+        numericalize = lambda example: {
+            "input_ids": vocab(
                 (["<bos>"] if append_bos else [])
                 + example["tokens"]
                 + (["<eos>"] if append_eos else [])
             )
-            ids = vocab(tokens)
-            # Pad or truncate to fixed size
-            if len(ids) < l_max:
-                ids = ids + [vocab["<pad>"]] * (l_max - len(ids))
-            else:
-                ids = ids[:l_max]
-            return {"input_ids": ids}
+        }
 
         dataset = dataset.map(
             numericalize,
             remove_columns=["tokens"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
         
@@ -278,7 +295,18 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     x_test = dataset["test"]["input_ids"]
     y_test = dataset["test"]["label"]
     
-    # Convert to JAX arrays once (in memory for speed)
+    # Pad sequences to fixed length
+    def pad_to_length(sequences, length, pad_value):
+        padded = np.zeros((len(sequences), length), dtype=np.int64)
+        for i, seq in enumerate(sequences):
+            seq_len = min(len(seq), length)
+            padded[i, :seq_len] = seq[:seq_len]
+        return padded
+    
+    x_train = pad_to_length(x_train, l_max, vocab["<pad>"])
+    x_test = pad_to_length(x_test, l_max, vocab["<pad>"])
+    
+    # Convert to JAX arrays
     x_train = jnp.array(x_train)[..., None] 
     x_test = jnp.array(x_test)[..., None]
     y_train = jnp.array(y_train).astype(int)
@@ -318,6 +346,8 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         input_dim=1,
         output_dim=2,
         seq_len=l_max,
+        vocab_size=len(vocab),
+        use_embedding=True
     )
 
 def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
@@ -335,13 +365,27 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
          # But for now we assume it exists as per reference
          pass 
 
-    cache_path = os.path.join(data_dir, "aan_processed")
-    if os.path.exists(cache_path):
+    cache_dir_name = f"l_max-{l_max}-append_bos-{append_bos}-append_eos-{append_eos}"
+    potential_caches = [
+        os.path.join(data_dir, "aan", cache_dir_name, cache_dir_name), # User's doubly nested style
+        os.path.join(data_dir, "aan", cache_dir_name),                 # Standard nested style
+        os.path.join(data_dir, "aan_processed"),                       # Our flattened style
+    ]
+    
+    cache_path = None
+    for p in potential_caches:
+        if os.path.exists(p):
+            cache_path = p
+            break
+            
+    if cache_path:
         print(f"Loading processed AAN from cache: {cache_path}")
         dataset = DatasetDict.load_from_disk(cache_path)
         with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:
             vocab = pickle.load(f)
     else:
+        # Default save path if none found
+        cache_path = potential_caches[1] # Use standard nested style as default (potential_caches[1])
         dataset = load_dataset(
             "csv",
             data_files={
@@ -351,6 +395,7 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
             },
             delimiter="\t",
             column_names=["label", "input1_id", "input2_id", "text1", "text2"],
+            keep_in_memory=True,
         )
         dataset = dataset.remove_columns(["input1_id", "input2_id"])
         
@@ -366,9 +411,12 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         dataset = dataset.map(
             tokenize,
             remove_columns=["text1", "text2"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
 
+        # Build vocab (reference uses direct concatenation)
         vocab = tf_vocab.build_vocab_from_iterator(
             dataset["train"]["tokens1"] + dataset["train"]["tokens2"],
             specials=(
@@ -379,29 +427,19 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         )
         vocab.set_default_index(vocab["<unk>"])
 
-        def numericalize(example):
-            t1 = (["<bos>"] if append_bos else []) + example["tokens1"] + (["<eos>"] if append_eos else [])
-            t2 = (["<bos>"] if append_bos else []) + example["tokens2"] + (["<eos>"] if append_eos else [])
-            
-            id1 = vocab(t1)
-            id2 = vocab(t2)
-                    
-            half = l_max // 2
-            ids1 = id1[:half]
-            ids2 = id2[:half]
-            
-            full_ids = ids1 + [vocab["<pad>"]] + ids2 
-            
-            if len(full_ids) < l_max:
-                full_ids = full_ids + [vocab["<pad>"]] * (l_max - len(full_ids))
-            else:
-                full_ids = full_ids[:l_max]
-                
-            return {"input_ids": full_ids}
+        encode = lambda text: vocab(
+            (["<bos>"] if append_bos else []) + text + (["<eos>"] if append_eos else [])
+        )
+        numericalize = lambda example: {
+            "input_ids1": encode(example["tokens1"]),
+            "input_ids2": encode(example["tokens2"]),
+        }
 
         dataset = dataset.map(
             numericalize,
             remove_columns=["tokens1", "tokens2"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
         
@@ -410,15 +448,69 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         dataset.save_to_disk(cache_path)
         with open(os.path.join(cache_path, "vocab.pkl"), "wb") as f:
             pickle.dump(vocab, f)
+    # Extract and process AAN data (two sequences per example)
+    dataset.set_format(type="numpy", columns=["input_ids1", "input_ids2", "label"])
     
-    dataset.set_format(type="numpy", columns=["input_ids", "label"])
+    def pad_aan(ids1_batch, ids2_batch, l_max, pad_value):
+        """Pad two sequences separately unlike the old concatenation approach."""
+        batch_size = len(ids1_batch)
+        # We store as (batch, 2, l_max) to keep sequences separate
+        result = np.zeros((batch_size, 2, l_max), dtype=np.int64)
+        
+        for i in range(batch_size):
+            ids1 = np.array(ids1_batch[i])
+            ids2 = np.array(ids2_batch[i])
+            
+            # Pad or truncate ids1 to l_max
+            if len(ids1) < l_max:
+                ids1 = np.pad(ids1, (0, l_max - len(ids1)), constant_values=pad_value)
+            else:
+                ids1 = ids1[:l_max]
+                
+            # Pad or truncate ids2 to l_max
+            if len(ids2) < l_max:
+                ids2 = np.pad(ids2, (0, l_max - len(ids2)), constant_values=pad_value)
+            else:
+                ids2 = ids2[:l_max]
+            
+            result[i, 0] = ids1
+            result[i, 1] = ids2
+        
+        return result
     
-    x_train = jnp.array(dataset["train"]["input_ids"])[..., None]
-    y_train = jnp.array(dataset["train"]["label"]).astype(int)
-    x_val = jnp.array(dataset["val"]["input_ids"])[..., None]
-    y_val = jnp.array(dataset["val"]["label"]).astype(int)
-    x_test = jnp.array(dataset["test"]["input_ids"])[..., None]
-    y_test = jnp.array(dataset["test"]["label"]).astype(int)
+    # Process each split
+    x_train = pad_aan(
+        dataset["train"]["input_ids1"],
+        dataset["train"]["input_ids2"],
+        l_max,
+        vocab["<pad>"]
+    )
+    y_train = dataset["train"]["label"].astype(int)
+    
+    x_val = pad_aan(
+        dataset["val"]["input_ids1"],
+        dataset["val"]["input_ids2"],
+        l_max,
+        vocab["<pad>"]
+    )
+    y_val = dataset["val"]["label"].astype(int)
+    
+    x_test = pad_aan(
+        dataset["test"]["input_ids1"],
+        dataset["test"]["input_ids2"],
+        l_max,
+        vocab["<pad>"]
+    )
+    y_test = dataset["test"]["label"].astype(int)
+    
+    # Convert to JAX arrays (stack them appropriately)
+    # Shape: (batch, 2, l_max, 1)
+    x_train = jnp.array(x_train)[..., None]
+    x_val = jnp.array(x_val)[..., None]
+    x_test = jnp.array(x_test)[..., None]
+    y_train = jnp.array(y_train)
+    y_val = jnp.array(y_val)
+    y_test = jnp.array(y_test)
     
     def to_onehot(y):
         oh = jnp.zeros((len(y), 2))
@@ -430,7 +522,15 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         "test": Dataloader(x_test, to_onehot(y_test), inmemory=True),
     }
 
-    return Dataset(name="aan", dataloaders=dataloaders, input_dim=1, output_dim=2, seq_len=l_max)
+    return Dataset(
+        name="aan", 
+        dataloaders=dataloaders, 
+        input_dim=1, 
+        output_dim=2, 
+        seq_len=l_max,
+        vocab_size=len(vocab),
+        use_embedding=True
+    )
 
 
 def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
@@ -446,13 +546,27 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     if not os.path.exists(data_path):
          pass
 
-    cache_path = os.path.join(data_dir, "listops_processed")
-    if os.path.exists(cache_path):
+    cache_dir_name = f"l_max-{l_max}-append_bos-{append_bos}-append_eos-{append_eos}"
+    potential_caches = [
+        os.path.join(data_dir, "listops", cache_dir_name, cache_dir_name), # User's doubly nested style
+        os.path.join(data_dir, "listops", cache_dir_name),                 # Standard nested style
+        os.path.join(data_dir, "listops_processed"),                       # Our flattened style
+    ]
+    
+    cache_path = None
+    for p in potential_caches:
+        if os.path.exists(p):
+            cache_path = p
+            break
+            
+    if cache_path:
         print(f"Loading processed ListOps from cache: {cache_path}")
         dataset = DatasetDict.load_from_disk(cache_path)
         with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:
             vocab = pickle.load(f)
     else:
+        # Default save path if none found
+        cache_path = potential_caches[1] # Use standard nested style as default
         dataset = load_dataset(
             "csv",
             data_files={
@@ -461,6 +575,7 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
                 "test": os.path.join(data_path, "basic_test.tsv"),
             },
             delimiter="\t",
+            keep_in_memory=True,
         )
 
         def listops_tokenizer(s):
@@ -475,11 +590,13 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         dataset = dataset.map(
             tokenize,
             remove_columns=["Source"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
         
         vocab = tf_vocab.build_vocab_from_iterator(
-            dataset["train"]["tokens"],
+            (tokens for tokens in dataset["train"]["tokens"]),
             specials=(
                 ["<pad>", "<unk>"]
                 + (["<bos>"] if append_bos else [])
@@ -488,22 +605,19 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         )
         vocab.set_default_index(vocab["<unk>"])
         
-        def numericalize(example):
-            tokens = (
+        numericalize = lambda example: {
+            "input_ids": vocab(
                 (["<bos>"] if append_bos else [])
                 + example["tokens"]
                 + (["<eos>"] if append_eos else [])
             )
-            ids = vocab(tokens)
-            if len(ids) < l_max:
-                ids = ids + [vocab["<pad>"]] * (l_max - len(ids))
-            else:
-                ids = ids[:l_max]
-            return {"input_ids": ids}
+        }
 
         dataset = dataset.map(
             numericalize,
             remove_columns=["tokens"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
         
@@ -515,11 +629,24 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     
     dataset.set_format(type="numpy", columns=["input_ids", "Target"])
     
-    x_train = jnp.array(dataset["train"]["input_ids"])[..., None]
+    # Pad sequences to fixed length
+    def pad_to_length(sequences, length, pad_value):
+        padded = np.zeros((len(sequences), length), dtype=np.int64)
+        for i, seq in enumerate(sequences):
+            seq_len = min(len(seq), length)
+            padded[i, :seq_len] = seq[:seq_len]
+        return padded
+    
+    x_train = pad_to_length(dataset["train"]["input_ids"], l_max, vocab["<pad>"])
+    x_val = pad_to_length(dataset["val"]["input_ids"], l_max, vocab["<pad>"])
+    x_test = pad_to_length(dataset["test"]["input_ids"], l_max, vocab["<pad>"])
+    
+    # Convert to JAX
+    x_train = jnp.array(x_train)[..., None]
     y_train = jnp.array(dataset["train"]["Target"]).astype(int)
-    x_val = jnp.array(dataset["val"]["input_ids"])[..., None]
+    x_val = jnp.array(x_val)[..., None]
     y_val = jnp.array(dataset["val"]["Target"]).astype(int)
-    x_test = jnp.array(dataset["test"]["input_ids"])[..., None]
+    x_test = jnp.array(x_test)[..., None]
     y_test = jnp.array(dataset["test"]["Target"]).astype(int)
     
     def to_onehot(y):
@@ -532,7 +659,15 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         "test": Dataloader(x_test, to_onehot(y_test), inmemory=True),
     }
     
-    return Dataset(name="listops", dataloaders=dataloaders, input_dim=1, output_dim=10, seq_len=l_max)
+    return Dataset(
+        name="listops", 
+        dataloaders=dataloaders, 
+        input_dim=1, 
+        output_dim=10, 
+        seq_len=l_max,
+        vocab_size=len(vocab),
+        use_embedding=True
+    )
 
 
 class LazyPathfinderData:
@@ -683,7 +818,14 @@ def create_pathfinder(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
             "val": Dataloader(LazyPathfinderData(val_samples, resolution, seq_len), to_onehot(samples_to_y(val_samples))),
             "test": Dataloader(LazyPathfinderData(test_samples, resolution, seq_len), to_onehot(samples_to_y(test_samples))),
         }
-        return Dataset(name="pathfinder", dataloaders=dataloaders, input_dim=input_dim, output_dim=output_dim, seq_len=seq_len)
+        return Dataset(
+            name="pathfinder", 
+            dataloaders=dataloaders, 
+            input_dim=input_dim, 
+            output_dim=output_dim, 
+            seq_len=seq_len,
+            use_embedding=False
+        )
 
     # If we loaded from .npz (Not Lazy)
     n = len(X)
@@ -706,7 +848,14 @@ def create_pathfinder(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         "test": Dataloader(X[test_idxs], to_onehot(Y[test_idxs])),
     }
     
-    return Dataset(name="pathfinder", dataloaders=dataloaders, input_dim=input_dim, output_dim=output_dim, seq_len=seq_len)
+    return Dataset(
+        name="pathfinder", 
+        dataloaders=dataloaders, 
+        input_dim=input_dim, 
+        output_dim=output_dim, 
+        seq_len=seq_len,
+        use_embedding=False
+    )
 
 
 def create_dataset(name: str, *, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:

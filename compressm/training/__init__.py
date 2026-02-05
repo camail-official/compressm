@@ -1,4 +1,4 @@
-"""Training utilities for Compre-SSM."""
+"""Training utilities for CompreSSM."""
 
 from compressm.training.trainer import train, ReductionConfig
 from compressm.training.utils import (

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Reproduction script for Compre-SSM paper results.
+Reproduction script for CompreSSM paper results.
 
 This script runs experiments from pre-defined paper configurations.
 
@@ -97,7 +97,7 @@ def run_experiment(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Reproduce Compre-SSM paper results",
+        description="Reproduce CompreSSM paper results",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

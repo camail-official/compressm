@@ -332,29 +332,45 @@ class LRUBlock(eqx.Module):
         return eqx.tree_at(lambda block: block.lru, self, reduced_lru)
 
 
+class DualHead(eqx.Module):
+    """Dual head for processing concatenated features from two sequences."""
+    layer1: eqx.nn.Linear
+    layer2: eqx.nn.Linear
+    layer3: eqx.nn.Linear
+
+    def __init__(self, in_features: int, hidden_features: int, out_features: int, *, key: jr.PRNGKey):
+        key1, key2, key3 = jr.split(key, 3)
+        self.layer1 = eqx.nn.Linear(in_features, hidden_features, use_bias=True, key=key1)
+        self.layer2 = eqx.nn.Linear(hidden_features, int(hidden_features // 2), use_bias=True, key=key2)
+        self.layer3 = eqx.nn.Linear(int(hidden_features // 2), out_features, use_bias=True, key=key3)
+
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        x = self.layer1(x)
+        x = jax.nn.relu(x)
+        x = self.layer2(x)
+        x = jax.nn.relu(x)
+        x = self.layer3(x)
+        return x
+
+
 class LRU(eqx.Module):
     """
     Full LRU model for sequence classification/regression.
     
     Architecture:
-    1. Linear encoder: input_dim -> hidden_dim
+    1. Encoder (Linear or Embedding): input_dim -> hidden_dim
     2. Stack of LRU blocks
     3. Global average pooling (for classification) or subsampling (for regression)
-    4. Linear output layer
-    
-    Attributes:
-        linear_encoder: Input projection
-        blocks: List of LRU blocks
-        linear_layer: Output projection
-        classification: Whether this is a classification task
-        output_step: For regression, subsample every output_step steps
+    4. Linear output layer or DualHead (for dual sequence tasks)
     """
     
-    linear_encoder: eqx.nn.Linear
+    linear_encoder: Union[eqx.nn.Linear, eqx.nn.Embedding]
     blocks: List[LRUBlock]
-    linear_layer: eqx.nn.Linear
+    linear_layer: Optional[eqx.nn.Linear]
+    dual_head: Optional[DualHead]
     classification: bool
     output_step: int
+    state_dim_init: int
     
     # Flags for training behavior
     stateful: bool = True
@@ -373,6 +389,9 @@ class LRU(eqx.Module):
         r_max: float = 0.999,
         max_phase: float = 6.28,
         drop_rate: float = 0.1,
+        use_embedding: bool = False,
+        vocab_size: Optional[int] = None,
+        dual: bool = False,
         *,
         key: jr.PRNGKey
     ):
@@ -391,25 +410,43 @@ class LRU(eqx.Module):
             r_max: Maximum eigenvalue magnitude
             max_phase: Maximum eigenvalue phase
             drop_rate: Dropout probability
+            use_embedding: Whether to use an embedding layer for input
+            vocab_size: Vocabulary size if using embedding
+            dual: Whether to use dual sequence processing (for AAN)
             key: JAX random key
         """
         encoder_key, *block_keys, output_key = jr.split(key, num_blocks + 2)
         
-        self.linear_encoder = eqx.nn.Linear(input_dim, hidden_dim, key=encoder_key)
+        if use_embedding:
+            if vocab_size is None:
+                raise ValueError("vocab_size must be provided when use_embedding is True")
+            self.linear_encoder = eqx.nn.Embedding(vocab_size, hidden_dim, key=encoder_key)
+        else:
+            self.linear_encoder = eqx.nn.Linear(input_dim, hidden_dim, key=encoder_key)
+            
         self.blocks = [
             LRUBlock(state_dim, hidden_dim, r_min, r_max, max_phase, drop_rate, key=k)
             for k in block_keys
         ]
-        self.linear_layer = eqx.nn.Linear(hidden_dim, output_dim, key=output_key)
+        
+        if dual:
+            self.dual_head = DualHead(2 * hidden_dim, hidden_dim, output_dim, key=output_key)
+            self.linear_layer = None
+        else:
+            self.linear_layer = eqx.nn.Linear(hidden_dim, output_dim, key=output_key)
+            self.dual_head = None
+            
         self.classification = classification
         self.output_step = output_step
+        self.state_dim_init = state_dim # Store for reference
 
     def __call__(self, x: jnp.ndarray, state, key: jr.PRNGKey):
         """
         Forward pass through the model.
         
         Args:
-            x: Input sequence, shape (seq_len, input_dim)
+            x: Input sequence, shape (seq_len, input_dim) 
+               OR (seq_len,) if using embedding
             state: Batch norm states
             key: Random key for dropout
             
@@ -420,21 +457,31 @@ class LRU(eqx.Module):
         drop_keys = jr.split(key, len(self.blocks))
         
         # Encode input
-        x = jax.vmap(self.linear_encoder)(x)
+        if isinstance(self.linear_encoder, eqx.nn.Embedding):
+            # x is (seq_len, 1), we squeeze to (seq_len,) and vmap over indices
+            x = jax.vmap(self.linear_encoder)(x.astype(jnp.int32).squeeze(-1))
+        else:
+            x = jax.vmap(self.linear_encoder)(x)
         
         # Process through blocks
         for block, k in zip(self.blocks, drop_keys):
             x, state = block(x, state, key=k)
         
         # Output
-        if self.classification:
-            x = jnp.mean(x, axis=0)  # Global average pooling
-            x = jax.nn.softmax(self.linear_layer(x), axis=0)
+        if self.dual_head is not None:
+            if self.classification:
+                features = jnp.mean(x, axis=0)  # (H,) - return pooled features
+            else:
+                raise NotImplementedError("Dual processing is not supported for regression tasks.")
+            return features, state
         else:
-            x = x[self.output_step - 1 :: self.output_step]  # Subsample
-            x = jax.nn.tanh(jax.vmap(self.linear_layer)(x))
-        
-        return x, state
+            if self.classification:
+                x = jnp.mean(x, axis=0)  # Global average pooling
+                x = jax.nn.softmax(self.linear_layer(x), axis=0)
+            else:
+                x = x[self.output_step - 1 :: self.output_step]  # Subsample
+                x = jax.nn.tanh(jax.vmap(self.linear_layer)(x))
+            return x, state
     
     @property
     def num_blocks(self) -> int:

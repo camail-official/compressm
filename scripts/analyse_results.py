@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Analysis script for Compre-SSM paper reproduction results.
+Analysis script for CompreSSM paper reproduction results.
 
 Aggregates results across seeds and generates publication-quality plots
 matching the paper figures.
@@ -425,7 +425,7 @@ def print_comparison_table(grouped_results: Dict[str, List[RunResult]]):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Analyse Compre-SSM paper reproduction results",
+        description="Analyse CompreSSM paper reproduction results",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     

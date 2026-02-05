@@ -5,6 +5,7 @@
 
 # Dataset
 dataset: aan
+data_dir: /fast/pnazari/data/lra_release
 
 # Model Architecture
 model:

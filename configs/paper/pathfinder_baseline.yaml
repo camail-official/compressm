@@ -4,6 +4,7 @@
 
 # Dataset
 dataset: pathfinder
+data_dir: /fast/pnazari/data/lra_release/pathfinder/pathfinder32
 
 # Model Architecture
 model:

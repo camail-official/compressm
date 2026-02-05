@@ -20,6 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 
+# Development
+dev/
+
 # Virtual environments
 .env
 .venv
@@ -36,6 +39,7 @@ venv/
 /data/
 /outputs/
 /results/
+wandb/
 
 # Jupyter
 .ipynb_checkpoints/

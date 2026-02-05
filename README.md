@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>The Curious Case of In-Training Compression of State Space Models</b><br>
-  <a href="https://arxiv.org/abs/2510.02823">Paper</a> • ICLR 2026
+  <a href="https://arxiv.org/abs/2510.02823">Paper</a> • ICLR 2026 • <a href="https://github.com/phnazari/compreSSMamba">Mamba Experiments</a>
 </p>
 
 <p align="center">
@@ -14,6 +14,10 @@
   <a href="https://github.com/google/jax"><img src="https://img.shields.io/badge/JAX-0.4+-green.svg" alt="JAX"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
+
+---
+
+This is the main repository accompanying the ICLR 2026 paper [The Curious Case of In-Training Compression of State Space Models](https://arxiv.org/abs/2510.02823). It contains the LRU experiments. The Mamba experiments are available in the [CompreSSMamba](https://github.com/phnazari/compreSSMamba) repository.
 
 ---
 
@@ -28,6 +32,22 @@ git clone https://github.com/camail-official/compressm.git
 cd compressm
 conda env create -f environment.yaml
 conda activate compressm
+```
+
+
+## Data Preparation
+
+The datasetsMNIST and CIFAR will auto-download into the `data/` directory. [LRA](#long-range-arena-lra) must be manually downloaded from the [GitHub page](https://github.com/google-research/long-range-arena).
+These datasets should be organized as follows:
+```
+path/to/data/
+  pathfinder/
+    pathfinder32/
+    pathfinder64/
+    pathfinder128/
+    pathfinder256/
+  aan/
+  listops/
 ```
 
 ## Quick Start

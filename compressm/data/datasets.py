@@ -6,22 +6,20 @@ datasets used for evaluating sequence models.
 """
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict
 import os
 
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
-import torch
-from torch import nn
-import torch.nn.functional as F
 import torchvision
 from torchvision import transforms
-from datasets import load_dataset, DatasetDict, Value
+from datasets import load_dataset, DatasetDict
 import torchtext
 from torchtext import vocab as tf_vocab
 from PIL import Image
 import glob
+from tqdm import tqdm
 
 from compressm.data.dataloaders import Dataloader
 
@@ -273,21 +271,22 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     # Convert to JAX arrays (expand dim for feature dimension)
     x_train = jnp.array(x_train)[..., None] 
     x_test = jnp.array(x_test)[..., None]
+    y_train = jnp.array(y_train)
+    y_test = jnp.array(y_test)
     
-    y_train = jnp.array(dataset["train"]["label"]).astype(int)
-    y_test = jnp.array(dataset["test"]["label"]).astype(int)
-    
-    def to_onehot(y):
-        oh = jnp.zeros((len(y), 2))
-        return oh.at[jnp.arange(len(y)), y].set(1)
+    # One-hot labels
+    train_onehot = jnp.zeros((len(y_train), 2))
+    train_onehot = train_onehot.at[jnp.arange(len(y_train)), y_train].set(1)
+    test_onehot = jnp.zeros((len(y_test), 2))
+    test_onehot = test_onehot.at[jnp.arange(len(y_test)), y_test].set(1)
 
     # Split
     if val_split == 0.0:
         # Use test set as val set
         dataloaders = {
-            "train": Dataloader(x_train, to_onehot(y_train)),
-            "val": Dataloader(x_test, to_onehot(y_test)), # Use test as val
-            "test": Dataloader(x_test, to_onehot(y_test)),
+            "train": Dataloader(x_train, train_onehot),
+            "val": Dataloader(x_test, test_onehot), # Use test as val
+            "test": Dataloader(x_test, test_onehot),
         }
     else:
         split_key, key = jr.split(key)
@@ -298,9 +297,9 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         val_idxs = idxs[:val_size]
         
         dataloaders = {
-            "train": Dataloader(x_train[train_idxs], to_onehot(y_train[train_idxs])),
-            "val": Dataloader(x_train[val_idxs], to_onehot(y_train[val_idxs])),
-            "test": Dataloader(x_test, to_onehot(y_test)),
+            "train": Dataloader(x_train[train_idxs], train_onehot[train_idxs]),
+            "val": Dataloader(x_train[val_idxs], train_onehot[val_idxs]),
+            "test": Dataloader(x_test, test_onehot),
         }
 
     return Dataset(
@@ -405,11 +404,11 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     dataset.set_format(type="numpy", columns=["input_ids", "label"])
     
     x_train = jnp.array(dataset["train"]["input_ids"])[..., None]
-    y_train = jnp.array(dataset["train"]["label"]).astype(int)
+    y_train = jnp.array(dataset["train"]["label"])
     x_val = jnp.array(dataset["val"]["input_ids"])[..., None]
-    y_val = jnp.array(dataset["val"]["label"]).astype(int)
+    y_val = jnp.array(dataset["val"]["label"])
     x_test = jnp.array(dataset["test"]["input_ids"])[..., None]
-    y_test = jnp.array(dataset["test"]["label"]).astype(int)
+    y_test = jnp.array(dataset["test"]["label"])
     
     def to_onehot(y):
         oh = jnp.zeros((len(y), 2))
@@ -497,11 +496,11 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     dataset.set_format(type="numpy", columns=["input_ids", "Target"])
     
     x_train = jnp.array(dataset["train"]["input_ids"])[..., None]
-    y_train = jnp.array(dataset["train"]["Target"]).astype(int)
+    y_train = jnp.array(dataset["train"]["Target"])
     x_val = jnp.array(dataset["val"]["input_ids"])[..., None]
-    y_val = jnp.array(dataset["val"]["Target"]).astype(int)
+    y_val = jnp.array(dataset["val"]["Target"])
     x_test = jnp.array(dataset["test"]["input_ids"])[..., None]
-    y_test = jnp.array(dataset["test"]["Target"]).astype(int)
+    y_test = jnp.array(dataset["test"]["Target"])
     
     def to_onehot(y):
         oh = jnp.zeros((len(y), 10))
@@ -534,16 +533,28 @@ def create_pathfinder(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     
     data_path = None
     for opt in options:
-        if os.path.exists(os.path.join(opt, "curv_baseline")):
+        if os.path.exists(os.path.join(opt, "curv_baseline")) or os.path.exists(os.path.join(opt, f"pathfinder{resolution}_preprocessed.npz")):
             data_path = opt
             break
             
     if data_path is None:
-        data_path = options[0] # Fallback to first option for logging
+        data_path = options[0] 
         
     print(f"Loading Pathfinder dataset from: {data_path}")
     
-    def load_images(root, split_name):
+    def load_images(root):
+         # Try to load from preprocessed .npz file first (much faster)
+         npz_path = os.path.join(root, f"pathfinder{resolution}_preprocessed.npz")
+         if os.path.exists(npz_path):
+             print(f"Loading preprocessed Pathfinder data from {npz_path}...")
+             data = np.load(npz_path, allow_pickle=True)
+             images = data['images'] # (N, H, W)
+             labels = data['labels']
+             if len(images.shape) == 3:
+                 images = images.reshape(images.shape[0], -1) # Flatten
+             return images[..., None], labels
+
+         # Fallback to individual image loading
          samples = []
          base = os.path.join(root, "curv_baseline")
          if not os.path.exists(base):
@@ -553,11 +564,10 @@ def create_pathfinder(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
          print(f"Checking metadata directory: {metadata_dir}")
          
          if os.path.exists(metadata_dir):
-             # Try both .npy and .txt as some versions vary
+             # Try both .npy and .txt
              files = sorted(glob.glob(os.path.join(metadata_dir, "*.npy")) + glob.glob(os.path.join(metadata_dir, "*.txt")))
-             if not files:
-                 print(f"Warning: No metadata files found in {metadata_dir}")
              
+             print(f"Parsing {len(files)} metadata files...")
              for fpath in files:
                   try:
                       with open(fpath, "r") as f:
@@ -569,48 +579,37 @@ def create_pathfinder(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
                                   img_rel = os.path.join(parts[0], parts[1])
                                   label = int(parts[3])
                                   img_full = os.path.join(base, img_rel)
-                                  if os.path.exists(img_full):
-                                      samples.append((img_full, label))
-                  except Exception as e:
-                      print(f"Error reading metadata file {fpath}: {e}")
-         else:
-             print(f"Warning: Metadata directory {metadata_dir} does not exist")
+                                  # Skip os.path.exists check here for speed on Lustre
+                                  samples.append((img_full, label))
+                  except:
+                      pass
          
-         # Load images
-         X = []
-         Y = []
          if not samples:
-             print(f"No valid image samples found in {data_path}")
-             return np.zeros((0, seq_len, 1)), np.zeros((0,))
+             raise ValueError(f"No valid image samples found in {data_path}")
              
          print(f"Found {len(samples)} samples. Loading images...")
-         # Limit loading for speed if needed? No, user expect full dataset.
-         for p, l in samples:
+         X = []
+         Y = []
+         for p, l in tqdm(samples, desc="Loading images"):
              try:
                  img = Image.open(p).convert("L")
                  if img.size != (resolution, resolution):
                      img = img.resize((resolution, resolution))
-                 arr = np.array(img).flatten()
-                 X.append(arr)
+                 X.append(np.array(img).flatten())
                  Y.append(l)
-             except Exception as e:
+             except:
                  pass
                  
          if len(X) == 0:
-             return np.zeros((0, seq_len, 1)), np.zeros((0,))
+             raise ValueError(f"Failed to load any images from {data_path}")
              
          return np.array(X)[..., None], np.array(Y)
 
-    X, Y = load_images(data_path, "all")
-    
-    # Convert to numpy/jax
-    X = np.array(X)
-    Y = np.array(Y)
-    
+    X_np, Y_np = load_images(data_path)
+    X = jnp.array(X_np)
+    Y = jnp.array(Y_np)
     n = len(X)
-    if n == 0:
-        raise ValueError(f"Failed to load Pathfinder dataset from {data_path}. Please check your data directory structure.")
-        
+    
     # Shuffle and split
     split_key, key = jr.split(key)
     idxs = jr.permutation(split_key, n)
@@ -627,9 +626,9 @@ def create_pathfinder(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         return oh.at[jnp.arange(len(y)), y.astype(int)].set(1)
 
     dataloaders = {
-        "train": Dataloader(jnp.array(X[train_idxs]), to_onehot(Y[train_idxs])),
-        "val": Dataloader(jnp.array(X[val_idxs]), to_onehot(Y[val_idxs])),
-        "test": Dataloader(jnp.array(X[test_idxs]), to_onehot(Y[test_idxs])),
+        "train": Dataloader(X[train_idxs], to_onehot(Y[train_idxs])),
+        "val": Dataloader(X[val_idxs], to_onehot(Y[val_idxs])),
+        "test": Dataloader(X[test_idxs], to_onehot(Y[test_idxs])),
     }
     
     return Dataset(name="pathfinder", dataloaders=dataloaders, input_dim=input_dim, output_dim=output_dim, seq_len=seq_len)

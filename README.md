@@ -40,7 +40,7 @@ conda activate compressm
 The datasetsMNIST and CIFAR will auto-download into the `data/` directory. [LRA](#long-range-arena-lra) must be manually downloaded from the [GitHub page](https://github.com/google-research/long-range-arena).
 These datasets should be organized as follows:
 ```
-path/to/data/
+path/to/lra_release/
   pathfinder/
     pathfinder32/
     pathfinder64/

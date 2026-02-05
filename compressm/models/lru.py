@@ -458,10 +458,8 @@ class LRU(eqx.Module):
         
         # Encode input
         if isinstance(self.linear_encoder, eqx.nn.Embedding):
-            # x is a sequence of token IDs, so we don't vmap here if embedding expects 1D input
-            # Actually, Equinox Embedding __call__ takes an integer (a single index) or a sequence of integers
-            # If we pass a sequence, it returns (seq_len, embedding_dim)
-            x = self.linear_encoder(x.astype(jnp.int32).squeeze(-1))
+            # x is (seq_len, 1), we squeeze to (seq_len,) and vmap over indices
+            x = jax.vmap(self.linear_encoder)(x.astype(jnp.int32).squeeze(-1))
         else:
             x = jax.vmap(self.linear_encoder)(x)
         

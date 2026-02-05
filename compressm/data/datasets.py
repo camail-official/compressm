@@ -230,6 +230,8 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         dataset = dataset.map(
             tokenize,
             remove_columns=["text"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
         
@@ -245,23 +247,19 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         )
         vocab.set_default_index(vocab["<unk>"])
         
-        def numericalize(example):
-            tokens = (
+        numericalize = lambda example: {
+            "input_ids": vocab(
                 (["<bos>"] if append_bos else [])
                 + example["tokens"]
                 + (["<eos>"] if append_eos else [])
             )
-            ids = vocab(tokens)
-            # Pad or truncate to fixed size
-            if len(ids) < l_max:
-                ids = ids + [vocab["<pad>"]] * (l_max - len(ids))
-            else:
-                ids = ids[:l_max]
-            return {"input_ids": ids}
+        }
 
         dataset = dataset.map(
             numericalize,
             remove_columns=["tokens"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
         
@@ -278,7 +276,18 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     x_test = dataset["test"]["input_ids"]
     y_test = dataset["test"]["label"]
     
-    # Convert to JAX arrays once (in memory for speed)
+    # Pad sequences to fixed length
+    def pad_to_length(sequences, length, pad_value):
+        padded = np.zeros((len(sequences), length), dtype=np.int64)
+        for i, seq in enumerate(sequences):
+            seq_len = min(len(seq), length)
+            padded[i, :seq_len] = seq[:seq_len]
+        return padded
+    
+    x_train = pad_to_length(x_train, l_max, vocab["<pad>"])
+    x_test = pad_to_length(x_test, l_max, vocab["<pad>"])
+    
+    # Convert to JAX arrays
     x_train = jnp.array(x_train)[..., None] 
     x_test = jnp.array(x_test)[..., None]
     y_train = jnp.array(y_train).astype(int)
@@ -351,6 +360,7 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
             },
             delimiter="\t",
             column_names=["label", "input1_id", "input2_id", "text1", "text2"],
+            keep_in_memory=True,
         )
         dataset = dataset.remove_columns(["input1_id", "input2_id"])
         
@@ -366,9 +376,12 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         dataset = dataset.map(
             tokenize,
             remove_columns=["text1", "text2"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
 
+        # Build vocab (reference uses direct concatenation)
         vocab = tf_vocab.build_vocab_from_iterator(
             dataset["train"]["tokens1"] + dataset["train"]["tokens2"],
             specials=(
@@ -379,29 +392,19 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         )
         vocab.set_default_index(vocab["<unk>"])
 
-        def numericalize(example):
-            t1 = (["<bos>"] if append_bos else []) + example["tokens1"] + (["<eos>"] if append_eos else [])
-            t2 = (["<bos>"] if append_bos else []) + example["tokens2"] + (["<eos>"] if append_eos else [])
-            
-            id1 = vocab(t1)
-            id2 = vocab(t2)
-                    
-            half = l_max // 2
-            ids1 = id1[:half]
-            ids2 = id2[:half]
-            
-            full_ids = ids1 + [vocab["<pad>"]] + ids2 
-            
-            if len(full_ids) < l_max:
-                full_ids = full_ids + [vocab["<pad>"]] * (l_max - len(full_ids))
-            else:
-                full_ids = full_ids[:l_max]
-                
-            return {"input_ids": full_ids}
+        encode = lambda text: vocab(
+            (["<bos>"] if append_bos else []) + text + (["<eos>"] if append_eos else [])
+        )
+        numericalize = lambda example: {
+            "input_ids1": encode(example["tokens1"]),
+            "input_ids2": encode(example["tokens2"]),
+        }
 
         dataset = dataset.map(
             numericalize,
             remove_columns=["tokens1", "tokens2"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
         
@@ -410,15 +413,72 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         dataset.save_to_disk(cache_path)
         with open(os.path.join(cache_path, "vocab.pkl"), "wb") as f:
             pickle.dump(vocab, f)
+    # Extract and process AAN data (two sequences per example)
+    dataset.set_format(type="numpy", columns=["input_ids1", "input_ids2", "label"])
     
-    dataset.set_format(type="numpy", columns=["input_ids", "label"])
+    def pad_and_concat_aan(ids1_batch, ids2_batch, l_max, pad_value):
+        """Pad and concatenate two sequences like the reference implementation."""
+        batch_size = len(ids1_batch)
+        result = np.zeros((batch_size, l_max), dtype=np.int64)
+        
+        for i in range(batch_size):
+            ids1 = ids1_batch[i]
+            ids2 = ids2_batch[i]
+            
+            # Get max length between the two sequences
+            L = max(len(ids1), len(ids2))
+            
+            # Pad both to same length L
+            if len(ids1) < L:
+                ids1 = np.pad(ids1, (0, L - len(ids1)), constant_values=pad_value)
+            if len(ids2) < L:
+                ids2 = np.pad(ids2, (0, L - len(ids2)), constant_values=pad_value)
+            
+            # Concatenate
+            combined = np.concatenate([ids1, ids2])
+            
+            # Pad or truncate to l_max
+            if len(combined) < l_max:
+                combined = np.pad(combined, (0, l_max - len(combined)), constant_values=pad_value)
+            else:
+                combined = combined[:l_max]
+            
+            result[i] = combined
+        
+        return result
     
-    x_train = jnp.array(dataset["train"]["input_ids"])[..., None]
-    y_train = jnp.array(dataset["train"]["label"]).astype(int)
-    x_val = jnp.array(dataset["val"]["input_ids"])[..., None]
-    y_val = jnp.array(dataset["val"]["label"]).astype(int)
-    x_test = jnp.array(dataset["test"]["input_ids"])[..., None]
-    y_test = jnp.array(dataset["test"]["label"]).astype(int)
+    # Process each split
+    x_train = pad_and_concat_aan(
+        dataset["train"]["input_ids1"],
+        dataset["train"]["input_ids2"],
+        l_max,
+        vocab["<pad>"]
+    )
+    y_train = dataset["train"]["label"].astype(int)
+    
+    x_val = pad_and_concat_aan(
+        dataset["val"]["input_ids1"],
+        dataset["val"]["input_ids2"],
+        l_max,
+        vocab["<pad>"]
+    )
+    y_val = dataset["val"]["label"].astype(int)
+    
+    x_test = pad_and_concat_aan(
+        dataset["test"]["input_ids1"],
+        dataset["test"]["input_ids2"],
+        l_max,
+        vocab["<pad>"]
+    )
+    y_test = dataset["test"]["label"].astype(int)
+    
+    # Convert to JAX arrays
+    x_train = jnp.array(x_train)[..., None]
+    x_val = jnp.array(x_val)[..., None]
+    x_test = jnp.array(x_test)[..., None]
+    y_train = jnp.array(y_train)
+    y_val = jnp.array(y_val)
+    y_test = jnp.array(y_test)
     
     def to_onehot(y):
         oh = jnp.zeros((len(y), 2))
@@ -461,6 +521,7 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
                 "test": os.path.join(data_path, "basic_test.tsv"),
             },
             delimiter="\t",
+            keep_in_memory=True,
         )
 
         def listops_tokenizer(s):
@@ -475,11 +536,13 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         dataset = dataset.map(
             tokenize,
             remove_columns=["Source"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
         
         vocab = tf_vocab.build_vocab_from_iterator(
-            dataset["train"]["tokens"],
+            (tokens for tokens in dataset["train"]["tokens"]),
             specials=(
                 ["<pad>", "<unk>"]
                 + (["<bos>"] if append_bos else [])
@@ -488,22 +551,19 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         )
         vocab.set_default_index(vocab["<unk>"])
         
-        def numericalize(example):
-            tokens = (
+        numericalize = lambda example: {
+            "input_ids": vocab(
                 (["<bos>"] if append_bos else [])
                 + example["tokens"]
                 + (["<eos>"] if append_eos else [])
             )
-            ids = vocab(tokens)
-            if len(ids) < l_max:
-                ids = ids + [vocab["<pad>"]] * (l_max - len(ids))
-            else:
-                ids = ids[:l_max]
-            return {"input_ids": ids}
+        }
 
         dataset = dataset.map(
             numericalize,
             remove_columns=["tokens"],
+            keep_in_memory=True,
+            load_from_cache_file=False,
             num_proc=4,
         )
         
@@ -515,9 +575,22 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     
     dataset.set_format(type="numpy", columns=["input_ids", "Target"])
     
-    x_train = jnp.array(dataset["train"]["input_ids"])[..., None]
+    # Pad sequences to fixed length
+    def pad_to_length(sequences, length, pad_value):
+        padded = np.zeros((len(sequences), length), dtype=np.int64)
+        for i, seq in enumerate(sequences):
+            seq_len = min(len(seq), length)
+            padded[i, :seq_len] = seq[:seq_len]
+        return padded
+    
+    x_train = pad_to_length(dataset["train"]["input_ids"], l_max, vocab["<pad>"])
+    x_val = pad_to_length(dataset["val"]["input_ids"], l_max, vocab["<pad>"])
+    x_test = pad_to_length(dataset["test"]["input_ids"], l_max, vocab["<pad>"])
+    
+    # Convert to JAX
+    x_train = jnp.array(x_train)[..., None]
     y_train = jnp.array(dataset["train"]["Target"]).astype(int)
-    x_val = jnp.array(dataset["val"]["input_ids"])[..., None]
+    x_val = jnp.array(x_val)[..., None]
     y_val = jnp.array(dataset["val"]["Target"]).astype(int)
     x_test = jnp.array(dataset["test"]["input_ids"])[..., None]
     y_test = jnp.array(dataset["test"]["Target"]).astype(int)

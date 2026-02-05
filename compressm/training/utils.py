@@ -185,6 +185,7 @@ def calc_output(
     Args:
         model: The LRU model
         X: Input batch, shape (batch_size, seq_len, input_dim)
+           OR (batch_size, 2, seq_len, input_dim) if dual
         state: Batch norm state
         key: Random key for dropout
         
@@ -192,9 +193,51 @@ def calc_output(
         predictions: Model outputs
         state: Updated batch norm state
     """
-    output, state = jax.vmap(
-        model, axis_name="batch", in_axes=(0, None, None), out_axes=(0, None)
-    )(X, state, key)
+def calc_output(
+    model: eqx.Module,
+    X: jnp.ndarray,
+    state,
+    key: jax.random.PRNGKey
+) -> Tuple[jnp.ndarray, Any]:
+    """
+    Compute model output with batching.
+    
+    Args:
+        model: The LRU model
+        X: Input batch, shape (batch_size, seq_len, input_dim)
+           OR (batch_size, 2, seq_len, input_dim) if dual
+        state: Batch norm state
+        key: Random key for dropout
+        
+    Returns:
+        predictions: Model outputs
+        state: Updated batch norm state
+    """
+    if hasattr(model, "dual_head") and model.dual_head is not None:
+        # X is (B, 2, L, D)
+        B, dual_factor, L, D = X.shape
+        assert dual_factor == 2
+        X_reshaped = X.reshape(B * dual_factor, L, D)
+        
+        # Process through model blocks (which return features because dual_head is present)
+        # vmap over 2B sequences
+        features, state = jax.vmap(
+            model, axis_name="batch", in_axes=(0, None, None), out_axes=(0, None)
+        )(X_reshaped, state, key)
+        
+        # features is (2B, H)
+        # Reshape back to (B, 2, H) and concatenate to (B, 2*H)
+        features_combined = features.reshape(B, 2, -1).reshape(B, -1)
+        
+        # Final classification head
+        output = jax.vmap(model.dual_head)(features_combined)
+        output = jax.nn.softmax(output, axis=1)
+    else:
+        # Normal processing
+        output, state = jax.vmap(
+            model, axis_name="batch", in_axes=(0, None, None), out_axes=(0, None)
+        )(X, state, key)
+        
     return output, state
 
 

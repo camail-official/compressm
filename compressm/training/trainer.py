@@ -211,6 +211,9 @@ def train(
         r_min=model_config.r_min,
         r_max=model_config.r_max,
         drop_rate=model_config.drop_rate,
+        use_embedding=dataset.use_embedding,
+        vocab_size=dataset.vocab_size,
+        dual=(dataset.name == "aan"),
         key=model_key,
     )
     

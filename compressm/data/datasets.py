@@ -42,6 +42,8 @@ class Dataset:
     input_dim: int
     output_dim: int
     seq_len: int
+    vocab_size: Optional[int] = None
+    use_embedding: bool = False
 
 
 def create_smnist(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
@@ -327,6 +329,8 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         input_dim=1,
         output_dim=2,
         seq_len=l_max,
+        vocab_size=len(vocab),
+        use_embedding=True
     )
 
 def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
@@ -416,39 +420,35 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     # Extract and process AAN data (two sequences per example)
     dataset.set_format(type="numpy", columns=["input_ids1", "input_ids2", "label"])
     
-    def pad_and_concat_aan(ids1_batch, ids2_batch, l_max, pad_value):
-        """Pad and concatenate two sequences like the reference implementation."""
+    def pad_aan(ids1_batch, ids2_batch, l_max, pad_value):
+        """Pad two sequences separately unlike the old concatenation approach."""
         batch_size = len(ids1_batch)
-        result = np.zeros((batch_size, l_max), dtype=np.int64)
+        # We store as (batch, 2, l_max) to keep sequences separate
+        result = np.zeros((batch_size, 2, l_max), dtype=np.int64)
         
         for i in range(batch_size):
-            ids1 = ids1_batch[i]
-            ids2 = ids2_batch[i]
+            ids1 = np.array(ids1_batch[i])
+            ids2 = np.array(ids2_batch[i])
             
-            # Get max length between the two sequences
-            L = max(len(ids1), len(ids2))
-            
-            # Pad both to same length L
-            if len(ids1) < L:
-                ids1 = np.pad(ids1, (0, L - len(ids1)), constant_values=pad_value)
-            if len(ids2) < L:
-                ids2 = np.pad(ids2, (0, L - len(ids2)), constant_values=pad_value)
-            
-            # Concatenate
-            combined = np.concatenate([ids1, ids2])
-            
-            # Pad or truncate to l_max
-            if len(combined) < l_max:
-                combined = np.pad(combined, (0, l_max - len(combined)), constant_values=pad_value)
+            # Pad or truncate ids1 to l_max
+            if len(ids1) < l_max:
+                ids1 = np.pad(ids1, (0, l_max - len(ids1)), constant_values=pad_value)
             else:
-                combined = combined[:l_max]
+                ids1 = ids1[:l_max]
+                
+            # Pad or truncate ids2 to l_max
+            if len(ids2) < l_max:
+                ids2 = np.pad(ids2, (0, l_max - len(ids2)), constant_values=pad_value)
+            else:
+                ids2 = ids2[:l_max]
             
-            result[i] = combined
+            result[i, 0] = ids1
+            result[i, 1] = ids2
         
         return result
     
     # Process each split
-    x_train = pad_and_concat_aan(
+    x_train = pad_aan(
         dataset["train"]["input_ids1"],
         dataset["train"]["input_ids2"],
         l_max,
@@ -456,7 +456,7 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     )
     y_train = dataset["train"]["label"].astype(int)
     
-    x_val = pad_and_concat_aan(
+    x_val = pad_aan(
         dataset["val"]["input_ids1"],
         dataset["val"]["input_ids2"],
         l_max,
@@ -464,7 +464,7 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     )
     y_val = dataset["val"]["label"].astype(int)
     
-    x_test = pad_and_concat_aan(
+    x_test = pad_aan(
         dataset["test"]["input_ids1"],
         dataset["test"]["input_ids2"],
         l_max,
@@ -472,7 +472,8 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     )
     y_test = dataset["test"]["label"].astype(int)
     
-    # Convert to JAX arrays
+    # Convert to JAX arrays (stack them appropriately)
+    # Shape: (batch, 2, l_max, 1)
     x_train = jnp.array(x_train)[..., None]
     x_val = jnp.array(x_val)[..., None]
     x_test = jnp.array(x_test)[..., None]
@@ -490,7 +491,15 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         "test": Dataloader(x_test, to_onehot(y_test), inmemory=True),
     }
 
-    return Dataset(name="aan", dataloaders=dataloaders, input_dim=1, output_dim=2, seq_len=l_max)
+    return Dataset(
+        name="aan", 
+        dataloaders=dataloaders, 
+        input_dim=1, 
+        output_dim=2, 
+        seq_len=l_max,
+        vocab_size=len(vocab),
+        use_embedding=True
+    )
 
 
 def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
@@ -605,7 +614,15 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         "test": Dataloader(x_test, to_onehot(y_test), inmemory=True),
     }
     
-    return Dataset(name="listops", dataloaders=dataloaders, input_dim=1, output_dim=10, seq_len=l_max)
+    return Dataset(
+        name="listops", 
+        dataloaders=dataloaders, 
+        input_dim=1, 
+        output_dim=10, 
+        seq_len=l_max,
+        vocab_size=len(vocab),
+        use_embedding=True
+    )
 
 
 class LazyPathfinderData:

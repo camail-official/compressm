@@ -1,5 +1,5 @@
 """
-Compre-SSM: In-Training Compression of State Space Models
+CompreSSM: In-Training Compression of State Space Models
 
 This package implements balanced truncation-based compression for SSMs,
 specifically the LRU (Linear Recurrent Unit) architecture.

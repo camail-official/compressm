@@ -1,5 +1,5 @@
 """
-Training utilities for Compre-SSM.
+Training utilities for CompreSSM.
 
 This module provides optimizer creation, loss functions, and
 the core training step function.

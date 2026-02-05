@@ -1,4 +1,4 @@
-# sMNIST Configuration for Compre-SSM
+# sMNIST Configuration for CompreSSM
 # Sequential MNIST: 784-step sequence classification (10 classes)
 # NOTE: sMNIST uses a simpler architecture (1 block) than sCIFAR
 

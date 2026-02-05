@@ -1,4 +1,4 @@
-"""Model implementations for Compre-SSM."""
+"""Model implementations for CompreSSM."""
 
 from compressm.models.lru import LRU, LRUBlock, LRULayer
 

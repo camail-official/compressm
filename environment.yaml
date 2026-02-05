@@ -1,4 +1,4 @@
-# Conda environment file for Compre-SSM
+# Conda environment file for CompreSSM
 # Install with: conda env create -f environment.yaml
 # Or update with: conda env update -f environment.yaml
 

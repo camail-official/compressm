@@ -1,5 +1,5 @@
 """
-Unified training loop for Compre-SSM.
+Unified training loop for CompreSSM.
 
 This module provides the main training function with integrated
 support for different reduction modes:

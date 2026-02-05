@@ -370,6 +370,7 @@ class LRU(eqx.Module):
     dual_head: Optional[DualHead]
     classification: bool
     output_step: int
+    state_dim_init: int
     
     # Flags for training behavior
     stateful: bool = True

@@ -21,6 +21,7 @@ from PIL import Image
 import glob
 import pickle
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 from compressm.data.dataloaders import Dataloader
 

@@ -25,6 +25,14 @@ from typing import Optional
 
 from compressm.data.dataloaders import Dataloader
 
+# Lustre filesystem fixes for Hugging Face datasets
+try:
+    import datasets.utils.file_utils as file_utils
+    from filelock import SoftFileLock
+    file_utils.FileLock = SoftFileLock
+except ImportError:
+    pass
+
 
 @dataclass
 class Dataset:
@@ -210,8 +218,20 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     print(f"IMDB {level} level | min_freq {min_freq}")
     print(f"Loading IMDB dataset from: {data_dir}")
     
-    cache_path = os.path.join(data_dir, f"imdb_{level}_processed")
-    if os.path.exists(cache_path):
+    # Check both potential cache locations
+    cache_dir_name = f"l_max-{l_max}-level-{level}-min_freq-{min_freq}-append_bos-{append_bos}-append_eos-{append_eos}"
+    potential_caches = [
+        os.path.join(data_dir, "imdb", "cache", cache_dir_name), # Reference style
+        os.path.join(data_dir, f"imdb_{level}_processed"),      # Our flattened style
+    ]
+    
+    cache_path = None
+    for p in potential_caches:
+        if os.path.exists(p):
+            cache_path = p
+            break
+            
+    if cache_path:
         print(f"Loading processed IMDB from cache: {cache_path}")
         dataset = DatasetDict.load_from_disk(cache_path)
         with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:
@@ -351,8 +371,20 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
          # But for now we assume it exists as per reference
          pass 
 
-    cache_path = os.path.join(data_dir, "aan_processed")
-    if os.path.exists(cache_path):
+    cache_dir_name = f"l_max-{l_max}-append_bos-{append_bos}-append_eos-{append_eos}"
+    potential_caches = [
+        os.path.join(data_dir, "aan", cache_dir_name, cache_dir_name), # User's doubly nested style
+        os.path.join(data_dir, "aan", cache_dir_name),                 # Standard nested style
+        os.path.join(data_dir, "aan_processed"),                       # Our flattened style
+    ]
+    
+    cache_path = None
+    for p in potential_caches:
+        if os.path.exists(p):
+            cache_path = p
+            break
+            
+    if cache_path:
         print(f"Loading processed AAN from cache: {cache_path}")
         dataset = DatasetDict.load_from_disk(cache_path)
         with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:
@@ -518,8 +550,20 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     if not os.path.exists(data_path):
          pass
 
-    cache_path = os.path.join(data_dir, "listops_processed")
-    if os.path.exists(cache_path):
+    cache_dir_name = f"l_max-{l_max}-append_bos-{append_bos}-append_eos-{append_eos}"
+    potential_caches = [
+        os.path.join(data_dir, "listops", cache_dir_name, cache_dir_name), # User's doubly nested style
+        os.path.join(data_dir, "listops", cache_dir_name),                 # Standard nested style
+        os.path.join(data_dir, "listops_processed"),                       # Our flattened style
+    ]
+    
+    cache_path = None
+    for p in potential_caches:
+        if os.path.exists(p):
+            cache_path = p
+            break
+            
+    if cache_path:
         print(f"Loading processed ListOps from cache: {cache_path}")
         dataset = DatasetDict.load_from_disk(cache_path)
         with open(os.path.join(cache_path, "vocab.pkl"), "rb") as f:

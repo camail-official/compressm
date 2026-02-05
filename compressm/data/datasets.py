@@ -116,6 +116,7 @@ def create_smnist(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         input_dim=1,
         output_dim=10,
         seq_len=784,
+        use_embedding=False
     )
 
 
@@ -190,6 +191,7 @@ def create_scifar(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         input_dim=3,
         output_dim=10,
         seq_len=1024,
+        use_embedding=False
     )
 
 def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
@@ -773,7 +775,14 @@ def create_pathfinder(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
             "val": Dataloader(LazyPathfinderData(val_samples, resolution, seq_len), to_onehot(samples_to_y(val_samples))),
             "test": Dataloader(LazyPathfinderData(test_samples, resolution, seq_len), to_onehot(samples_to_y(test_samples))),
         }
-        return Dataset(name="pathfinder", dataloaders=dataloaders, input_dim=input_dim, output_dim=output_dim, seq_len=seq_len)
+        return Dataset(
+            name="pathfinder", 
+            dataloaders=dataloaders, 
+            input_dim=input_dim, 
+            output_dim=output_dim, 
+            seq_len=seq_len,
+            use_embedding=False
+        )
 
     # If we loaded from .npz (Not Lazy)
     n = len(X)
@@ -796,7 +805,14 @@ def create_pathfinder(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
         "test": Dataloader(X[test_idxs], to_onehot(Y[test_idxs])),
     }
     
-    return Dataset(name="pathfinder", dataloaders=dataloaders, input_dim=input_dim, output_dim=output_dim, seq_len=seq_len)
+    return Dataset(
+        name="pathfinder", 
+        dataloaders=dataloaders, 
+        input_dim=input_dim, 
+        output_dim=output_dim, 
+        seq_len=seq_len,
+        use_embedding=False
+    )
 
 
 def create_dataset(name: str, *, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:

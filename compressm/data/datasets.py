@@ -208,6 +208,7 @@ def create_imdb(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     val_split = 0.0 # Use test as val by default if 0.0
 
     print(f"IMDB {level} level | min_freq {min_freq}")
+    print(f"Loading IMDB dataset from: {data_dir}")
     
     # Load dataset
     dataset = load_dataset("imdb", cache_dir=data_dir)
@@ -323,8 +324,8 @@ def create_aan(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     append_bos = False
     append_eos = True
     
-    # Ensure data exists
     data_path = os.path.join(data_dir, "aan")
+    print(f"Loading AAN dataset from: {data_path}")
     if not os.path.exists(data_path):
          # This should probably be handled by user downloading LRA
          # But for now we assume it exists as per reference
@@ -437,6 +438,7 @@ def create_listops(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     append_eos = True
     
     data_path = os.path.join(data_dir, "listops")
+    print(f"Loading ListOps dataset from: {data_path}")
     if not os.path.exists(data_path):
          pass
 
@@ -534,6 +536,7 @@ def create_pathfinder(*, key: jr.PRNGKey, data_dir: str = "./data") -> Dataset:
     
     # Check if preprocessed exists
     data_path = os.path.join(data_dir, f"pathfinder/pathfinder{resolution}")
+    print(f"Loading Pathfinder dataset from: {data_path}")
     # reference implementation uses `pathfinder{resolution}_preprocessed.npz`
     # We will try to find something similar or just error if not found?
     # Actually, let's look for the folder structure.
